@@ -2,13 +2,10 @@ import { prisma } from "@/lib/prisma";
 import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import AddressAutoComplete from "../../new/AddressAutoComplete";
+import DeleteCustomerButton from "./DeleteCustomerButton";
 
 function getButtonClass() {
   return "rounded-xl border border-black bg-white px-5 py-3 text-black transition duration-150 hover:bg-gray-100 active:scale-[0.98] active:bg-black active:text-white";
-}
-
-function getDangerButtonClass() {
-  return "rounded-xl border border-red-600 bg-white px-5 py-3 text-red-600 transition duration-150 hover:bg-red-50 active:scale-[0.98] active:bg-red-600 active:text-white";
 }
 
 function normalizeGreekPhone(rawPhone: string) {
@@ -109,7 +106,7 @@ export default async function EditCustomerPage({
     redirect(`/customers/${customerId}`);
   }
 
-  async function deleteCustomer() {
+  async function deleteCustomer(formData: FormData) {
     "use server";
 
     const existingCustomer = await prisma.customer.findUnique({
@@ -289,11 +286,7 @@ export default async function EditCustomerPage({
             Δεν μπορεί να διαγραφεί αυτός ο πελάτης γιατί υπάρχουν συνδεδεμένες παραγγελίες.
           </div>
         ) : (
-          <form action={deleteCustomer}>
-            <button type="submit" className={getDangerButtonClass()}>
-              Διαγραφή εγγραφής
-            </button>
-          </form>
+          <DeleteCustomerButton action={deleteCustomer} />
         )}
       </section>
     </main>
