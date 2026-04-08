@@ -6,7 +6,7 @@
     "dev": "next dev",
     "postinstall": "prisma generate",
     "build": "prisma db push && next build",
-    "start": "next start -p 8080",
+    "start": "next start -p 3000",
     "lint": "eslint"
   },
   "dependencies": {
