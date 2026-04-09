@@ -14,20 +14,47 @@ export default function NewProductPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+
+    if (!name.trim()) {
+      alert("Συμπλήρωσε όνομα προϊόντος.");
+      return;
+    }
+
+    if (!unitPrice || Number.isNaN(Number(unitPrice))) {
+      alert("Συμπλήρωσε σωστή τιμή.");
+      return;
+    }
+
     setLoading(true);
 
-    await fetch("/api/products", {
-      method: "POST",
-      body: JSON.stringify({
-        name,
-        unitPrice: parseFloat(unitPrice),
-        category,
-        isActive,
-      }),
-    });
+    try {
+      const res = await fetch("/api/products", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: name.trim(),
+          unitPrice: Number(unitPrice),
+          category,
+          isActive,
+        }),
+      });
 
-    router.push("/products");
-    router.refresh();
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        alert(data?.error || "Αποτυχία αποθήκευσης προϊόντος.");
+        setLoading(false);
+        return;
+      }
+
+      router.push("/products");
+      router.refresh();
+    } catch (error) {
+      console.error("Create product error:", error);
+      alert("Προέκυψε σφάλμα κατά την αποθήκευση.");
+      setLoading(false);
+    }
   }
 
   return (
@@ -35,10 +62,9 @@ export default function NewProductPage() {
       <h1 className="text-2xl font-bold">Νέο Προϊόν</h1>
 
       <form onSubmit={handleSubmit} className="space-y-4">
-
         <input
           placeholder="Όνομα"
-          className="border p-2 w-full"
+          className="w-full rounded-xl border px-4 py-3"
           value={name}
           onChange={(e) => setName(e.target.value)}
           required
@@ -48,14 +74,14 @@ export default function NewProductPage() {
           type="number"
           step="0.01"
           placeholder="Τιμή (€)"
-          className="border p-2 w-full"
+          className="w-full rounded-xl border px-4 py-3"
           value={unitPrice}
           onChange={(e) => setUnitPrice(e.target.value)}
           required
         />
 
         <select
-          className="border p-2 w-full"
+          className="w-full rounded-xl border px-4 py-3"
           value={category}
           onChange={(e) => setCategory(e.target.value)}
         >
@@ -75,9 +101,9 @@ export default function NewProductPage() {
         <button
           type="submit"
           disabled={loading}
-          className="bg-black text-white px-4 py-2 rounded"
+          className="rounded-xl bg-black px-4 py-3 text-white disabled:opacity-50"
         >
-          Αποθήκευση
+          {loading ? "Αποθήκευση..." : "Αποθήκευση"}
         </button>
       </form>
     </main>
