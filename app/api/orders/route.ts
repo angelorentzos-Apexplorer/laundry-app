@@ -7,7 +7,10 @@ import {
   ServiceType,
 } from "@prisma/client";
 
-async function getNextSerial(tx: Prisma.TransactionClient, serviceType: ServiceType) {
+async function getNextSerial(
+  tx: Prisma.TransactionClient,
+  serviceType: ServiceType
+) {
   const sequenceKey =
     serviceType === "CARPETS"
       ? "order_item_serial_carpets"
@@ -124,18 +127,29 @@ export async function POST(req: Request) {
     }
 
     const order = await prisma.$transaction(async (tx) => {
-      const rowsWithRealSerials = [];
+      const rowsWithRealSerials: Array<{
+        productId: number;
+        quantity: number;
+        unitPrice: number;
+        lineTotal: number;
+        itemSerialNumber: number;
+      }> = [];
 
       for (const row of validRows) {
-        const realSerial = await getNextSerial(tx, serviceType as ServiceType);
+        const quantity = Number(row.quantity);
+        const unitPrice = Number(row.unitPrice);
 
-        rowsWithRealSerials.push({
-          productId: Number(row.productId),
-          quantity: Number(row.quantity),
-          unitPrice: Number(row.unitPrice),
-          lineTotal: Number(row.lineTotal),
-          itemSerialNumber: realSerial,
-        });
+        for (let i = 0; i < quantity; i++) {
+          const realSerial = await getNextSerial(tx, serviceType as ServiceType);
+
+          rowsWithRealSerials.push({
+            productId: Number(row.productId),
+            quantity: 1,
+            unitPrice,
+            lineTotal: unitPrice,
+            itemSerialNumber: realSerial,
+          });
+        }
       }
 
       return tx.order.create({

@@ -23,7 +23,7 @@ type Row = {
   quantity: number;
   unitPrice: number;
   lineTotal: number;
-  itemSerialNumber: number | null;
+  itemSerialNumbers: number[];
 };
 
 type ReceiptRow = {
@@ -79,8 +79,16 @@ function getPreviewBase(serviceType: ServiceType) {
   return serviceType === "CARPETS" ? 22000 : 1000;
 }
 
-function getPreviewSerial(serviceType: ServiceType, index: number) {
-  return getPreviewBase(serviceType) + index;
+function getPreviewSerials(
+  serviceType: ServiceType,
+  rowIndex: number,
+  quantity: number
+) {
+  const base = getPreviewBase(serviceType);
+
+  return Array.from({ length: quantity }, (_, i) => {
+    return base + rowIndex * 100 + i;
+  });
 }
 
 export default function NewOrderPageClient() {
@@ -112,7 +120,7 @@ export default function NewOrderPageClient() {
       quantity: 1,
       unitPrice: 0,
       lineTotal: 0,
-      itemSerialNumber: null,
+      itemSerialNumbers: [],
     },
   ]);
 
@@ -202,7 +210,7 @@ export default function NewOrderPageClient() {
         productId: "",
         unitPrice: 0,
         lineTotal: 0,
-        itemSerialNumber: null,
+        itemSerialNumbers: [],
       });
       return;
     }
@@ -211,10 +219,12 @@ export default function NewOrderPageClient() {
     const product = filteredProducts.find((p) => p.id === productId);
     if (!product) return;
 
+    const quantity = rows[index]?.quantity || 1;
+
     updateRow(index, {
       productId,
       unitPrice: product.unitPrice,
-      itemSerialNumber: getPreviewSerial(serviceType, index),
+      itemSerialNumbers: getPreviewSerials(serviceType, index, quantity),
     });
   }
 
@@ -226,7 +236,7 @@ export default function NewOrderPageClient() {
         quantity: 1,
         unitPrice: 0,
         lineTotal: 0,
-        itemSerialNumber: null,
+        itemSerialNumbers: [],
       },
     ]);
   }
@@ -242,7 +252,7 @@ export default function NewOrderPageClient() {
               quantity: 1,
               unitPrice: 0,
               lineTotal: 0,
-              itemSerialNumber: null,
+              itemSerialNumbers: [],
             },
           ];
     });
@@ -265,7 +275,7 @@ export default function NewOrderPageClient() {
         quantity: 1,
         unitPrice: 0,
         lineTotal: 0,
-        itemSerialNumber: null,
+        itemSerialNumbers: [],
       },
     ]);
   }, [serviceType]);
@@ -465,7 +475,7 @@ export default function NewOrderPageClient() {
           {rows.map((row, index) => (
             <div
               key={index}
-              className="grid gap-3 rounded-xl border p-3 md:grid-cols-[1.6fr_120px_110px_140px_120px]"
+              className="grid gap-3 rounded-xl border p-3 md:grid-cols-[1.6fr_180px_110px_140px_120px]"
             >
               <div>
                 <label className="mb-1 block text-sm font-medium">Προϊόν</label>
@@ -484,17 +494,29 @@ export default function NewOrderPageClient() {
               </div>
 
               <div>
-                <label className="mb-1 block text-sm font-medium">Αριθμός</label>
-                <input
-                  value={
-                    row.productId !== ""
-                      ? String(getPreviewSerial(serviceType, index))
-                      : ""
-                  }
-                  readOnly
-                  placeholder="Αυτόματο"
-                  className="w-full rounded-xl border bg-gray-50 px-4 py-3"
-                />
+                <label className="mb-1 block text-sm font-medium">
+                  Μοναδικοί αριθμοί
+                </label>
+
+                <div className="space-y-2">
+                  {row.productId !== "" && row.itemSerialNumbers.length > 0 ? (
+                    row.itemSerialNumbers.map((serial, serialIndex) => (
+                      <input
+                        key={serialIndex}
+                        value={serial}
+                        readOnly
+                        className="w-full rounded-xl border bg-gray-50 px-4 py-3"
+                      />
+                    ))
+                  ) : (
+                    <input
+                      value=""
+                      readOnly
+                      placeholder="Αυτόματο"
+                      className="w-full rounded-xl border bg-gray-50 px-4 py-3"
+                    />
+                  )}
+                </div>
               </div>
 
               <div>
@@ -503,11 +525,17 @@ export default function NewOrderPageClient() {
                   type="number"
                   min="1"
                   value={row.quantity}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const nextQuantity = Number(e.target.value) || 1;
+
                     updateRow(index, {
-                      quantity: Number(e.target.value) || 1,
-                    })
-                  }
+                      quantity: nextQuantity,
+                      itemSerialNumbers:
+                        row.productId !== ""
+                          ? getPreviewSerials(serviceType, index, nextQuantity)
+                          : [],
+                    });
+                  }}
                   className="w-full rounded-xl border px-4 py-3"
                 />
               </div>
@@ -745,7 +773,7 @@ export default function NewOrderPageClient() {
               <div className="space-y-2">
                 {receipt.rows.map((row, index) => (
                   <div
-                    key={`${row.productId}-${index}`}
+                    key={`${row.productId}-${index}-${row.itemSerialNumber ?? "x"}`}
                     className="rounded-lg border p-2 text-[11px]"
                   >
                     <div className="font-medium">{row.productName}</div>
