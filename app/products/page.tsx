@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-
+export const dynamic = "force-dynamic";
 function formatMoney(v: number) {
   return `${v.toFixed(2)} €`;
 }
