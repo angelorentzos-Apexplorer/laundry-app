@@ -82,15 +82,6 @@ function getButtonClass(isActive = false) {
   ].join(" ");
 }
 
-function getTabClass(isActive = false) {
-  return [
-    "rounded-xl border border-black px-4 py-3 transition duration-150",
-    isActive
-      ? "bg-black text-white"
-      : "bg-white text-black hover:bg-gray-100 active:scale-[0.98] active:bg-black active:text-white",
-  ].join(" ");
-}
-
 const ACTIVE_STORAGE_STATUSES: OrderStatus[] = [
   "NEW",
   "PROCESSING",
@@ -103,18 +94,68 @@ type StorageActionState = {
   error: string | null;
 };
 
+type GroupedOrderItem = {
+  productId: number | null;
+  productName: string;
+  quantity: number;
+  unitPrice: number | null;
+  lineTotal: number;
+  serials: Array<{
+    id: number;
+    itemSerialNumber: number | null;
+    storageChainNumber: string | null;
+  }>;
+};
+
+function groupOrderItems(
+  orderItems: Array<{
+    id: number;
+    quantity: number;
+    unitPrice: number;
+    lineTotal: number;
+    itemSerialNumber: number | null;
+    storageChainNumber: string | null;
+    product: {
+      id: number;
+      name: string;
+    } | null;
+  }>
+): GroupedOrderItem[] {
+  const map = new Map<string, GroupedOrderItem>();
+
+  for (const item of orderItems) {
+    const key = item.product?.id != null ? String(item.product.id) : `unknown-${item.id}`;
+
+    if (!map.has(key)) {
+      map.set(key, {
+        productId: item.product?.id ?? null,
+        productName: item.product?.name || "-",
+        quantity: 0,
+        unitPrice: item.unitPrice ?? null,
+        lineTotal: 0,
+        serials: [],
+      });
+    }
+
+    const group = map.get(key)!;
+    group.quantity += item.quantity ?? 1;
+    group.lineTotal += item.lineTotal ?? 0;
+    group.serials.push({
+      id: item.id,
+      itemSerialNumber: item.itemSerialNumber,
+      storageChainNumber: item.storageChainNumber,
+    });
+  }
+
+  return Array.from(map.values());
+}
+
 export default async function OrderPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ tab?: string }>;
 }) {
   const resolvedParams = await params;
-  const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const currentTab =
-    resolvedSearchParams?.tab === "financials" ? "financials" : "general";
-
   const orderId = Number(resolvedParams.id);
 
   if (!orderId || Number.isNaN(orderId)) {
@@ -170,10 +211,7 @@ export default async function OrderPage({
     });
 
     if (!currentItem || currentItem.orderId !== orderId) {
-      return {
-        ok: false,
-        error: "Το προϊόν δεν ανήκει στην τρέχουσα παραγγελία.",
-      };
+      return { ok: false, error: "Το προϊόν δεν ανήκει στην τρέχουσα παραγγελία." };
     }
 
     if (normalizedStorageChainNumber) {
@@ -479,6 +517,8 @@ export default async function OrderPage({
       ? order.totalPrice - (order.paidAmount ?? 0)
       : null;
 
+  const groupedOrderItems = groupOrderItems(order.orderItems);
+
   return (
     <main className="max-w-5xl space-y-6">
       <div className="rounded-2xl border bg-white p-6">
@@ -512,340 +552,337 @@ export default async function OrderPage({
         </div>
       </div>
 
-      <section className="rounded-2xl border bg-white p-4">
-        <div className="flex flex-wrap gap-3">
-          <a
-            href={`/orders/${order.id}?tab=general`}
-            className={getTabClass(currentTab === "general")}
-          >
-            Στοιχεία παραγγελίας
-          </a>
+      <section className="space-y-3 rounded-2xl border bg-white p-6">
+        <h2 className="text-lg font-bold">Στοιχεία παραγγελίας</h2>
 
-          <a
-            href={`/orders/${order.id}?tab=financials`}
-            className={getTabClass(currentTab === "financials")}
-          >
-            Οικονομικά στοιχεία
-          </a>
+        <div>
+          <span className="font-medium">Αριθμός παραγγελίας:</span> #{order.id}
+        </div>
+
+        <div>
+          <span className="font-medium">Πελάτης:</span> {order.customer.fullName}
+        </div>
+
+        <div>
+          <span className="font-medium">Τηλέφωνο:</span> {order.customer.phone}
+        </div>
+
+        <div>
+          <span className="font-medium">Υπηρεσία:</span>{" "}
+          {serviceTypeLabel(order.serviceType)}
+        </div>
+
+        <div>
+          <span className="font-medium">Αριθμός μαρκαρίσματος:</span>{" "}
+          {order.itemsDescription || "-"}
+        </div>
+
+        <div>
+          <span className="font-medium">Τεμάχια:</span> {order.quantity ?? "-"}
+        </div>
+
+        <div>
+          <span className="font-medium">Τετραγωνικά:</span>{" "}
+          {order.squareMeters ?? "-"}
+        </div>
+
+        <div>
+          <span className="font-medium">Ημερομηνία παραλαβής:</span>{" "}
+          {formatDate(order.pickupDate)}
+        </div>
+
+        <div>
+          <span className="font-medium">Ημερομηνία παράδοσης:</span>{" "}
+          {formatDate(order.deliveryDate)}
+        </div>
+
+        <div>
+          <span className="font-medium">Σημειώσεις:</span> {order.notes || "-"}
+        </div>
+
+        <div>
+          <span className="font-medium">Δημιουργήθηκε:</span>{" "}
+          {formatDate(order.createdAt)}
         </div>
       </section>
 
-      {currentTab === "general" && (
-        <>
-          <section className="space-y-3 rounded-2xl border bg-white p-6">
-            <h2 className="text-lg font-bold">Στοιχεία παραγγελίας</h2>
+      <section className="space-y-4 rounded-2xl border bg-white p-6">
+        <h2 className="text-lg font-bold">Προϊόντα παραγγελίας</h2>
 
-            <div>
-              <span className="font-medium">Αριθμός παραγγελίας:</span> #{order.id}
-            </div>
+        {groupedOrderItems.length === 0 ? (
+          <p className="text-gray-500">Δεν υπάρχουν καταχωρημένα προϊόντα.</p>
+        ) : (
+          <div className="space-y-4">
+            {groupedOrderItems.map((group, groupIndex) => (
+              <div
+                key={`${group.productId ?? "x"}-${groupIndex}`}
+                className="rounded-xl border bg-gray-50 p-4"
+              >
+                <div className="mb-4 grid gap-3 md:grid-cols-4">
+                  <div>
+                    <div className="text-sm text-gray-500">Προϊόν</div>
+                    <div className="font-medium">{group.productName}</div>
+                  </div>
 
-            <div>
-              <span className="font-medium">Πελάτης:</span> {order.customer.fullName}
-            </div>
+                  <div>
+                    <div className="text-sm text-gray-500">Τεμάχια</div>
+                    <div className="font-medium">{group.quantity}</div>
+                  </div>
 
-            <div>
-              <span className="font-medium">Τηλέφωνο:</span> {order.customer.phone}
-            </div>
-
-            <div>
-              <span className="font-medium">Υπηρεσία:</span>{" "}
-              {serviceTypeLabel(order.serviceType)}
-            </div>
-
-            <div>
-              <span className="font-medium">Τεμάχια:</span> {order.quantity ?? "-"}
-            </div>
-
-
-            <div>
-              <span className="font-medium">Ημερομηνία παράδοσης:</span>{" "}
-              {formatDate(order.deliveryDate)}
-            </div>
-
-            <div>
-              <span className="font-medium">Σημειώσεις:</span> {order.notes || "-"}
-            </div>
-
-            <div>
-              <span className="font-medium">Δημιουργήθηκε:</span>{" "}
-              {formatDate(order.createdAt)}
-            </div>
-          </section>
-
-          <section className="space-y-4 rounded-2xl border bg-white p-6">
-            <h2 className="text-lg font-bold">Προϊόντα παραγγελίας</h2>
-
-            {order.orderItems.length === 0 ? (
-              <p className="text-gray-500">Δεν υπάρχουν καταχωρημένα προϊόντα.</p>
-            ) : (
-              <div className="space-y-3">
-                {order.orderItems.map((item) => (
-                  <div
-                    key={item.id}
-                    className="grid gap-3 rounded-xl border bg-gray-50 p-4 md:grid-cols-6"
-                  >
-                    <div>
-                      <div className="text-sm text-gray-500">Προϊόν</div>
-                      <div className="font-medium">{item.product?.name || "-"}</div>
-                    </div>
-
-                    <div>
-                      <div className="text-sm text-gray-500">Αριθμός</div>
-                      <div className="font-medium">
-                        {item.itemSerialNumber ?? "-"}
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="text-sm text-gray-500">Ποσότητα</div>
-                      <div className="font-medium">{item.quantity}</div>
-                    </div>
-
-                    <div>
-                      <div className="text-sm text-gray-500">Τιμή μονάδας</div>
-                      <div className="font-medium">
-                        {formatMoney(item.unitPrice)}
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="text-sm text-gray-500">Σύνολο</div>
-                      <div className="font-medium">
-                        {formatMoney(item.lineTotal)}
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="text-sm text-gray-500">Αριθμός αλυσίδας</div>
-                      <OrderItemStorageForm
-                        orderItemId={item.id}
-                        defaultValue={item.storageChainNumber || ""}
-                        action={updateOrderItemStorageChainNumber}
-                      />
+                  <div>
+                    <div className="text-sm text-gray-500">Τιμή μονάδας</div>
+                    <div className="font-medium">
+                      {formatMoney(group.unitPrice)}
                     </div>
                   </div>
-                ))}
+
+                  <div>
+                    <div className="text-sm text-gray-500">Σύνολο είδους</div>
+                    <div className="font-medium">
+                      {formatMoney(group.lineTotal)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="text-sm font-medium">Μοναδικοί αριθμοί / αλυσίδες</div>
+
+                  {group.serials.map((serialItem, serialIndex) => (
+                    <div
+                      key={serialItem.id}
+                      className="grid gap-3 rounded-xl border bg-white p-3 md:grid-cols-[140px_1fr]"
+                    >
+                      <div>
+                        <div className="text-sm text-gray-500">Μοναδικός αριθμός</div>
+                        <div className="font-medium">
+                          {serialItem.itemSerialNumber ?? "-"}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-sm text-gray-500">Αριθμός αλυσίδας</div>
+                        <OrderItemStorageForm
+                          orderItemId={serialItem.id}
+                          defaultValue={serialItem.storageChainNumber || ""}
+                          action={updateOrderItemStorageChainNumber}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            )}
-          </section>
+            ))}
+          </div>
+        )}
+      </section>
 
-          <section className="space-y-4 rounded-2xl border bg-white p-6">
-            <h2 className="text-lg font-bold">Κατάσταση παραγγελίας</h2>
+      <section className="space-y-4 rounded-2xl border bg-white p-6">
+        <h2 className="text-lg font-bold">Οικονομικά στοιχεία</h2>
 
-            <div className="rounded-xl bg-gray-50 p-4">
-              <div className="text-sm text-gray-500">Τρέχουσα κατάσταση</div>
-              <div className="text-xl font-bold">{statusLabel(order.status)}</div>
+        <div className="grid gap-4 md:grid-cols-3">
+          <div className="rounded-xl bg-gray-50 p-4">
+            <div className="text-sm text-gray-500">Συνολικό ποσό</div>
+            <div className="text-xl font-bold">{formatMoney(order.totalPrice)}</div>
+          </div>
+
+          <div className="rounded-xl bg-gray-50 p-4">
+            <div className="text-sm text-gray-500">Πληρωμένο ποσό</div>
+            <div className="text-xl font-bold">{formatMoney(order.paidAmount)}</div>
+          </div>
+
+          <div className="rounded-xl bg-gray-50 p-4">
+            <div className="text-sm text-gray-500">Υπόλοιπο</div>
+            <div className="text-xl font-bold">
+              {remainingAmount == null ? "-" : formatMoney(remainingAmount)}
             </div>
+          </div>
+        </div>
 
-            <OrderStatusActions
-              currentStatus={order.status}
-              action={updateStatus}
+        <form action={addPayment} className="grid gap-4 md:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-sm font-medium">Ποσό πληρωμής</label>
+            <input
+              name="amount"
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="π.χ. 20"
+              className="w-full rounded-xl border px-4 py-3"
             />
-          </section>
+          </div>
 
-          <section className="space-y-4 rounded-2xl border bg-white p-6">
-            <h2 className="text-lg font-bold">Παράδοση και εξόφληση</h2>
+          <div>
+            <label className="mb-1 block text-sm font-medium">
+              Ημερομηνία πληρωμής
+            </label>
+            <input
+              name="paymentDate"
+              type="date"
+              defaultValue={formatDateForInput(new Date())}
+              className="w-full rounded-xl border px-4 py-3"
+            />
+          </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="rounded-xl bg-gray-50 p-4">
-                <div className="text-sm text-gray-500">Κατάσταση παράδοσης</div>
-                <div className="text-xl font-bold">
-                  {deliveryStatusLabel(order.deliveryStatus)}
-                </div>
-              </div>
+          <div className="md:col-span-2">
+            <label className="mb-1 block text-sm font-medium">Σημείωση πληρωμής</label>
+            <input
+              name="paymentNotes"
+              placeholder="π.χ. 2η προκαταβολή ή εξόφληση"
+              className="w-full rounded-xl border px-4 py-3"
+            />
+          </div>
 
-              <div className="rounded-xl bg-gray-50 p-4">
-                <div className="text-sm text-gray-500">Κατάσταση εξόφλησης</div>
-                <div className="text-xl font-bold">
-                  {paymentStatusLabel(order.paymentStatus)}
-                </div>
-              </div>
-            </div>
+          <div className="md:col-span-2 flex flex-wrap gap-3">
+            <button type="submit" className={getButtonClass()}>
+              Καταχώρηση νέας πληρωμής
+            </button>
 
-            <form action={markDeliveredAndPaid} className="space-y-4">
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Τελική τιμή παραγγελίας
-                </label>
-                <input
-                  name="totalPrice"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  defaultValue={order.totalPrice ?? ""}
-                  className="w-full rounded-xl border px-4 py-3"
-                />
-              </div>
+            <button
+              type="submit"
+              name="returnToCustomer"
+              value="1"
+              className={getButtonClass()}
+            >
+              Καταχώρηση πληρωμής και επιστροφή στον πελάτη
+            </button>
+          </div>
+        </form>
 
-              <div className="flex flex-wrap gap-3">
-                <button type="submit" className={getButtonClass()}>
-                  Παράδοση και εξόφληση
-                </button>
-              </div>
-            </form>
-          </section>
-        </>
-      )}
+        <form action={updateFinancials} className="grid gap-4 md:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-sm font-medium">Συνολικό ποσό</label>
+            <input
+              name="totalPrice"
+              type="number"
+              min="0"
+              step="0.01"
+              defaultValue={order.totalPrice ?? ""}
+              className="w-full rounded-xl border px-4 py-3"
+            />
+          </div>
 
-      {currentTab === "financials" && (
-        <>
-          <section className="space-y-4 rounded-2xl border bg-white p-6">
-            <h2 className="text-lg font-bold">Οικονομικά στοιχεία</h2>
+          <div>
+            <label className="mb-1 block text-sm font-medium">Πληρωμένο ποσό</label>
+            <input
+              name="paidAmount"
+              type="number"
+              min="0"
+              step="0.01"
+              defaultValue={order.paidAmount ?? ""}
+              className="w-full rounded-xl border px-4 py-3"
+            />
+          </div>
 
-            <div className="grid gap-4 md:grid-cols-3">
-              <div className="rounded-xl bg-gray-50 p-4">
-                <div className="text-sm text-gray-500">Συνολικό ποσό</div>
-                <div className="text-xl font-bold">{formatMoney(order.totalPrice)}</div>
-              </div>
+          <div className="md:col-span-2">
+            <label className="mb-1 block text-sm font-medium">Ημερομηνία παράδοσης</label>
+            <input
+              name="deliveryDate"
+              type="date"
+              defaultValue={formatDateForInput(order.deliveryDate)}
+              className="w-full rounded-xl border px-4 py-3"
+            />
+          </div>
 
-              <div className="rounded-xl bg-gray-50 p-4">
-                <div className="text-sm text-gray-500">Πληρωμένο ποσό</div>
-                <div className="text-xl font-bold">{formatMoney(order.paidAmount)}</div>
-              </div>
+          <div className="md:col-span-2 flex flex-wrap gap-3">
+            <button type="submit" className={getButtonClass()}>
+              Αποθήκευση οικονομικών στοιχείων & ημερομηνίας παράδοσης
+            </button>
 
-              <div className="rounded-xl bg-gray-50 p-4">
-                <div className="text-sm text-gray-500">Υπόλοιπο</div>
-                <div className="text-xl font-bold">
-                  {remainingAmount == null ? "-" : formatMoney(remainingAmount)}
-                </div>
-              </div>
-            </div>
+            <button
+              type="submit"
+              name="returnToCustomer"
+              value="1"
+              className={getButtonClass()}
+            >
+              Αποθήκευση και επιστροφή στον πελάτη
+            </button>
+          </div>
+        </form>
+      </section>
 
-            <form action={addPayment} className="grid gap-4 md:grid-cols-2">
-              <div>
-                <label className="mb-1 block text-sm font-medium">Ποσό πληρωμής</label>
-                <input
-                  name="amount"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  placeholder="π.χ. 20"
-                  className="w-full rounded-xl border px-4 py-3"
-                />
-              </div>
+      <section className="space-y-4 rounded-2xl border bg-white p-6">
+        <h2 className="text-lg font-bold">Καρτέλα πληρωμών</h2>
 
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Ημερομηνία πληρωμής
-                </label>
-                <input
-                  name="paymentDate"
-                  type="date"
-                  defaultValue={formatDateForInput(new Date())}
-                  className="w-full rounded-xl border px-4 py-3"
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="mb-1 block text-sm font-medium">
-                  Σημείωση πληρωμής
-                </label>
-                <input
-                  name="paymentNotes"
-                  placeholder="π.χ. 2η προκαταβολή ή εξόφληση"
-                  className="w-full rounded-xl border px-4 py-3"
-                />
-              </div>
-
-              <div className="md:col-span-2 flex flex-wrap gap-3">
-                <button type="submit" className={getButtonClass()}>
-                  Καταχώρηση νέας πληρωμής
-                </button>
-
-                <button
-                  type="submit"
-                  name="returnToCustomer"
-                  value="1"
-                  className={getButtonClass()}
-                >
-                  Καταχώρηση πληρωμής και επιστροφή στον πελάτη
-                </button>
-              </div>
-            </form>
-
-            <form action={updateFinancials} className="grid gap-4 md:grid-cols-2">
-              <div>
-                <label className="mb-1 block text-sm font-medium">Συνολικό ποσό</label>
-                <input
-                  name="totalPrice"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  defaultValue={order.totalPrice ?? ""}
-                  className="w-full rounded-xl border px-4 py-3"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-medium">Πληρωμένο ποσό</label>
-                <input
-                  name="paidAmount"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  defaultValue={order.paidAmount ?? ""}
-                  className="w-full rounded-xl border px-4 py-3"
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="mb-1 block text-sm font-medium">
-                  Ημερομηνία παράδοσης
-                </label>
-                <input
-                  name="deliveryDate"
-                  type="date"
-                  defaultValue={formatDateForInput(order.deliveryDate)}
-                  className="w-full rounded-xl border px-4 py-3"
-                />
-              </div>
-
-              <div className="md:col-span-2 flex flex-wrap gap-3">
-                <button type="submit" className={getButtonClass()}>
-                  Αποθήκευση οικονομικών στοιχείων & ημερομηνίας παράδοσης
-                </button>
-
-                <button
-                  type="submit"
-                  name="returnToCustomer"
-                  value="1"
-                  className={getButtonClass()}
-                >
-                  Αποθήκευση και επιστροφή στον πελάτη
-                </button>
-              </div>
-            </form>
-          </section>
-
-          <section className="space-y-4 rounded-2xl border bg-white p-6">
-            <h2 className="text-lg font-bold">Καρτέλα πληρωμών</h2>
-
-            {order.payments.length === 0 ? (
-              <p className="text-gray-500">Δεν υπάρχουν καταχωρημένες πληρωμές.</p>
-            ) : (
-              <div className="space-y-3">
-                {order.payments.map((payment) => (
-                  <div
-                    key={payment.id}
-                    className="rounded-xl border bg-gray-50 p-4"
-                  >
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div className="font-medium">{formatMoney(payment.amount)}</div>
-                      <div className="text-sm text-gray-600">
-                        {formatDate(payment.paymentDate)}
-                      </div>
-                    </div>
-
-                    <div className="mt-2 text-sm text-gray-700">
-                      {payment.notes || "-"}
-                    </div>
+        {order.payments.length === 0 ? (
+          <p className="text-gray-500">Δεν υπάρχουν καταχωρημένες πληρωμές.</p>
+        ) : (
+          <div className="space-y-3">
+            {order.payments.map((payment) => (
+              <div
+                key={payment.id}
+                className="rounded-xl border bg-gray-50 p-4"
+              >
+                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div className="font-medium">{formatMoney(payment.amount)}</div>
+                  <div className="text-sm text-gray-600">
+                    {formatDate(payment.paymentDate)}
                   </div>
-                ))}
+                </div>
+
+                <div className="mt-2 text-sm text-gray-700">
+                  {payment.notes || "-"}
+                </div>
               </div>
-            )}
-          </section>
-        </>
-      )}
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="space-y-4 rounded-2xl border bg-white p-6">
+        <h2 className="text-lg font-bold">Κατάσταση παραγγελίας</h2>
+
+        <div className="rounded-xl bg-gray-50 p-4">
+          <div className="text-sm text-gray-500">Τρέχουσα κατάσταση</div>
+          <div className="text-xl font-bold">{statusLabel(order.status)}</div>
+        </div>
+
+        <OrderStatusActions
+          currentStatus={order.status}
+          action={updateStatus}
+        />
+      </section>
+
+      <section className="space-y-4 rounded-2xl border bg-white p-6">
+        <h2 className="text-lg font-bold">Παράδοση και εξόφληση</h2>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="rounded-xl bg-gray-50 p-4">
+            <div className="text-sm text-gray-500">Κατάσταση παράδοσης</div>
+            <div className="text-xl font-bold">
+              {deliveryStatusLabel(order.deliveryStatus)}
+            </div>
+          </div>
+
+          <div className="rounded-xl bg-gray-50 p-4">
+            <div className="text-sm text-gray-500">Κατάσταση εξόφλησης</div>
+            <div className="text-xl font-bold">
+              {paymentStatusLabel(order.paymentStatus)}
+            </div>
+          </div>
+        </div>
+
+        <form action={markDeliveredAndPaid} className="space-y-4">
+          <div>
+            <label className="mb-1 block text-sm font-medium">
+              Τελική τιμή παραγγελίας
+            </label>
+            <input
+              name="totalPrice"
+              type="number"
+              min="0"
+              step="0.01"
+              defaultValue={order.totalPrice ?? ""}
+              className="w-full rounded-xl border px-4 py-3"
+            />
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            <button type="submit" className={getButtonClass()}>
+              Παράδοση και εξόφληση
+            </button>
+          </div>
+        </form>
+      </section>
     </main>
   );
 }

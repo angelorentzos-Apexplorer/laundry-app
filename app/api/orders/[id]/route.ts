@@ -1,211 +1,264 @@
 import { prisma } from "@/lib/prisma";
-import { ServiceType, OrderStatus, Prisma } from "@prisma/client";
+import {
+  DeliveryStatus,
+  OrderStatus,
+  PaymentStatus,
+  Prisma,
+} from "@prisma/client";
 
-export async function GET(
-  _req: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const resolvedParams = await params;
-  const orderId = Number(resolvedParams.id);
+function parseOrderIdFromUrl(req: Request) {
+  const url = new URL(req.url);
+  const parts = url.pathname.split("/").filter(Boolean);
+  const id = Number(parts[parts.length - 1]);
 
-  if (!orderId || Number.isNaN(orderId)) {
-    return Response.json({ error: "Μη έγκυρο order id" }, { status: 400 });
+  if (!id || Number.isNaN(id)) {
+    return null;
   }
 
-  const order = await prisma.order.findUnique({
-    where: { id: orderId },
-    include: {
-      customer: true,
-      orderItems: {
-        orderBy: { id: "asc" },
-      },
-    },
-  });
-
-  if (!order) {
-    return Response.json(
-      { error: "Η παραγγελία δεν βρέθηκε" },
-      { status: 404 }
-    );
-  }
-
-  return Response.json(order);
+  return id;
 }
 
-export async function PUT(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(req: Request) {
   try {
-    const resolvedParams = await params;
-    const orderId = Number(resolvedParams.id);
+    const orderId = parseOrderIdFromUrl(req);
 
-    if (!orderId || Number.isNaN(orderId)) {
-      return Response.json({ error: "Μη έγκυρο order id" }, { status: 400 });
-    }
-
-    const body = await req.json();
-
-    const customerId = Number(body.customerId);
-    const serviceType = String(body.serviceType || "").trim();
-
-    if (!customerId || Number.isNaN(customerId)) {
-      return Response.json({ error: "Μη έγκυρος πελάτης" }, { status: 400 });
-    }
-
-    if (
-      serviceType !== ServiceType.CLOTHES &&
-      serviceType !== ServiceType.CARPETS
-    ) {
-      return Response.json({ error: "Μη έγκυρη υπηρεσία" }, { status: 400 });
-    }
-
-    const rows = Array.isArray(body.rows) ? body.rows : [];
-
-    const validRows = rows.filter((row: any) => {
-      const productId = Number(row?.productId);
-      const quantity = Number(row?.quantity);
-      const unitPrice = Number(row?.unitPrice);
-      const lineTotal = Number(row?.lineTotal);
-      const itemSerialNumber = Number(row?.itemSerialNumber);
-
-      return (
-        row &&
-        !Number.isNaN(productId) &&
-        productId > 0 &&
-        !Number.isNaN(quantity) &&
-        quantity > 0 &&
-        !Number.isNaN(unitPrice) &&
-        unitPrice >= 0 &&
-        !Number.isNaN(lineTotal) &&
-        lineTotal >= 0 &&
-        !Number.isNaN(itemSerialNumber) &&
-        itemSerialNumber >= 1000 &&
-        itemSerialNumber <= 9999
-      );
-    });
-
-    if (rows.length > 0 && validRows.length !== rows.length) {
+    if (!orderId) {
       return Response.json(
-        { error: "Μία ή περισσότερες γραμμές προϊόντων δεν είναι έγκυρες." },
+        { error: "Μη έγκυρο ID παραγγελίας." },
         { status: 400 }
       );
     }
 
-    const serials = validRows.map((row: any) => Number(row.itemSerialNumber));
-    const uniqueSerials = new Set(serials);
-
-    if (serials.length !== uniqueSerials.size) {
-      return Response.json(
-        { error: "Υπάρχουν διπλοί αριθμοί προϊόντων στην ίδια παραγγελία." },
-        { status: 400 }
-      );
-    }
-
-    const totalItems = validRows.reduce(
-      (sum: number, row: any) => sum + Number(row.quantity),
-      0
-    );
-
-    const totalPrice = validRows.reduce(
-      (sum: number, row: any) => sum + Number(row.lineTotal),
-      0
-    );
-
-    const currentOrder = await prisma.order.findUnique({
+    const order = await prisma.order.findUnique({
       where: { id: orderId },
-      select: {
-        id: true,
-        status: true,
+      include: {
+        customer: true,
+        payments: {
+          orderBy: { paymentDate: "desc" },
+        },
+        orderItems: {
+          include: {
+            product: true,
+          },
+          orderBy: { id: "asc" },
+        },
       },
     });
 
-    if (!currentOrder) {
+    if (!order) {
       return Response.json(
-        { error: "Η παραγγελία δεν βρέθηκε" },
+        { error: "Η παραγγελία δεν βρέθηκε." },
         { status: 404 }
       );
     }
 
-    const paidAmount =
-      body.paidAmount != null && !Number.isNaN(Number(body.paidAmount))
-        ? Number(body.paidAmount)
-        : null;
+    return Response.json(order);
+  } catch (error) {
+    console.error("GET /api/orders/[id] error:", error);
 
-    let nextStatus: OrderStatus | undefined;
+    return Response.json(
+      { error: "Αποτυχία φόρτωσης παραγγελίας." },
+      { status: 500 }
+    );
+  }
+}
 
-    if (totalPrice > 0 && paidAmount != null && paidAmount >= totalPrice) {
-      nextStatus = "PAID";
+export async function PATCH(req: Request) {
+  try {
+    const orderId = parseOrderIdFromUrl(req);
+
+    if (!orderId) {
+      return Response.json(
+        { error: "Μη έγκυρο ID παραγγελίας." },
+        { status: 400 }
+      );
     }
 
-    const updatedOrder = await prisma.$transaction(async (tx) => {
-      await tx.order.update({
-        where: { id: orderId },
-        data: {
-          customer: {
-            connect: { id: customerId },
-          },
-          serviceType: serviceType as ServiceType,
-          itemsDescription: body.itemsDescription || null,
-          quantity: totalItems > 0 ? totalItems : null,
-          squareMeters:
-            body.squareMeters != null &&
-            !Number.isNaN(Number(body.squareMeters))
-              ? Number(body.squareMeters)
-              : null,
-          totalPrice: totalPrice > 0 ? totalPrice : null,
-          paidAmount,
-          deliveryDate: body.deliveryDate ? new Date(body.deliveryDate) : null,
-          notes: body.notes || null,
-          storageChainNumber: body.storageChainNumber || null,
-          ...(nextStatus ? { status: nextStatus } : {}),
+    const body = await req.json();
+
+    const existingOrder = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        totalPrice: true,
+        paidAmount: true,
+      },
+    });
+
+    if (!existingOrder) {
+      return Response.json(
+        { error: "Η παραγγελία δεν βρέθηκε." },
+        { status: 404 }
+      );
+    }
+
+    const itemsDescription =
+      body.itemsDescription != null
+        ? String(body.itemsDescription).trim() || null
+        : undefined;
+
+    const squareMeters =
+      body.squareMeters === null
+        ? null
+        : body.squareMeters != null && !Number.isNaN(Number(body.squareMeters))
+        ? Number(body.squareMeters)
+        : undefined;
+
+    const totalPrice =
+      body.totalPrice === null
+        ? null
+        : body.totalPrice != null && !Number.isNaN(Number(body.totalPrice))
+        ? Number(body.totalPrice)
+        : undefined;
+
+    const paidAmount =
+      body.paidAmount === null
+        ? null
+        : body.paidAmount != null && !Number.isNaN(Number(body.paidAmount))
+        ? Number(body.paidAmount)
+        : undefined;
+
+    const pickupDate =
+      body.pickupDate === null
+        ? null
+        : body.pickupDate && !Number.isNaN(Date.parse(body.pickupDate))
+        ? new Date(body.pickupDate)
+        : undefined;
+
+    const deliveryDate =
+      body.deliveryDate === null
+        ? null
+        : body.deliveryDate && !Number.isNaN(Date.parse(body.deliveryDate))
+        ? new Date(body.deliveryDate)
+        : undefined;
+
+    const notes =
+      body.notes != null ? String(body.notes).trim() || null : undefined;
+
+    const status =
+      body.status &&
+      ["NEW", "PROCESSING", "READY", "DELIVERED", "PAID"].includes(body.status)
+        ? (body.status as OrderStatus)
+        : undefined;
+
+    let nextPaymentStatus: PaymentStatus | undefined;
+    let nextDeliveryStatus: DeliveryStatus | undefined;
+
+    const effectiveTotalPrice =
+      totalPrice !== undefined ? totalPrice : existingOrder.totalPrice;
+
+    const effectivePaidAmount =
+      paidAmount !== undefined ? paidAmount : existingOrder.paidAmount;
+
+    if (
+      effectiveTotalPrice != null &&
+      effectivePaidAmount != null &&
+      effectivePaidAmount >= effectiveTotalPrice
+    ) {
+      nextPaymentStatus = "PAID";
+    } else if (effectivePaidAmount != null) {
+      nextPaymentStatus = "UNPAID";
+    }
+
+    if (status === "DELIVERED") {
+      nextDeliveryStatus = "DELIVERED";
+    } else if (
+      status === "NEW" ||
+      status === "PROCESSING" ||
+      status === "READY"
+    ) {
+      nextDeliveryStatus = "PENDING";
+    }
+
+    const updatedOrder = await prisma.order.update({
+      where: { id: orderId },
+      data: {
+        ...(itemsDescription !== undefined ? { itemsDescription } : {}),
+        ...(squareMeters !== undefined ? { squareMeters } : {}),
+        ...(totalPrice !== undefined ? { totalPrice } : {}),
+        ...(paidAmount !== undefined ? { paidAmount } : {}),
+        ...(pickupDate !== undefined ? { pickupDate } : {}),
+        ...(deliveryDate !== undefined ? { deliveryDate } : {}),
+        ...(notes !== undefined ? { notes } : {}),
+        ...(status !== undefined ? { status } : {}),
+        ...(nextPaymentStatus !== undefined
+          ? { paymentStatus: nextPaymentStatus }
+          : {}),
+        ...(nextDeliveryStatus !== undefined
+          ? { deliveryStatus: nextDeliveryStatus }
+          : {}),
+      },
+      include: {
+        customer: true,
+        payments: {
+          orderBy: { paymentDate: "desc" },
         },
-      });
-
-      await tx.orderItem.deleteMany({
-        where: { orderId },
-      });
-
-      if (validRows.length > 0) {
-        await tx.orderItem.createMany({
-          data: validRows.map((row: any) => ({
-            orderId,
-            productId: Number(row.productId),
-            quantity: Number(row.quantity),
-            unitPrice: Number(row.unitPrice),
-            lineTotal: Number(row.lineTotal),
-            itemSerialNumber: Number(row.itemSerialNumber),
-          })),
-        });
-      }
-
-      return tx.order.findUnique({
-        where: { id: orderId },
-        include: {
-          customer: true,
-          orderItems: {
-            orderBy: { id: "asc" },
+        orderItems: {
+          include: {
+            product: true,
           },
+          orderBy: { id: "asc" },
         },
-      });
+      },
     });
 
     return Response.json(updatedOrder);
   } catch (error) {
-    console.error("PUT /api/orders/[id] error:", error);
+    console.error("PATCH /api/orders/[id] error:", error);
+
+    return Response.json(
+      { error: "Αποτυχία ενημέρωσης παραγγελίας." },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    const orderId = parseOrderIdFromUrl(req);
+
+    if (!orderId) {
+      return Response.json(
+        { error: "Μη έγκυρο ID παραγγελίας." },
+        { status: 400 }
+      );
+    }
+
+    const existingOrder = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: { id: true },
+    });
+
+    if (!existingOrder) {
+      return Response.json(
+        { error: "Η παραγγελία δεν βρέθηκε." },
+        { status: 404 }
+      );
+    }
+
+    await prisma.order.delete({
+      where: { id: orderId },
+    });
+
+    return Response.json({
+      ok: true,
+      message: "Η παραγγελία διαγράφηκε επιτυχώς.",
+    });
+  } catch (error) {
+    console.error("DELETE /api/orders/[id] error:", error);
 
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
+      error.code === "P2025"
     ) {
       return Response.json(
-        { error: "Ο αριθμός προϊόντος χρησιμοποιήθηκε ήδη. Δοκιμάστε ξανά." },
-        { status: 409 }
+        { error: "Η παραγγελία δεν βρέθηκε." },
+        { status: 404 }
       );
     }
 
     return Response.json(
-      { error: "Αποτυχία ενημέρωσης παραγγελίας" },
+      { error: "Αποτυχία διαγραφής παραγγελίας." },
       { status: 500 }
     );
   }

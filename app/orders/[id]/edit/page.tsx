@@ -1,582 +1,419 @@
-"use client";
+import Link from "next/link";
+import { prisma } from "@/lib/prisma";
+import { OrderStatus, ServiceType } from "@prisma/client";
+import { notFound, redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 
-import { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { ProductType, ServiceType } from "@prisma/client";
+function getButtonClass() {
+  return "rounded-xl border border-black bg-white px-5 py-3 text-black transition duration-150 hover:bg-gray-100 active:scale-[0.98] active:bg-black active:text-white";
+}
 
-type Customer = {
-  id: number;
-  fullName: string | null;
-  phone: string | null;
-};
+function formatDateForInput(value: Date | string | null | undefined) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().split("T")[0];
+}
 
-type Product = {
-  id: number;
-  name: string;
-  category: ProductType;
-  unitPrice: number;
-  isActive: boolean;
-};
-
-type Row = {
-  productId: number | "";
-  quantity: number;
-  unitPrice: number;
-  lineTotal: number;
-  itemSerialNumber: number | null;
-};
-
-type OrderResponse = {
-  id: number;
-  customerId: number;
-  serviceType: ServiceType;
-  itemsDescription: string | null;
-  squareMeters: number | null;
-  paidAmount: number | null;
-  deliveryDate: string | null;
-  notes: string | null;
-  storageChainNumber: string | null;
-  orderItems: Array<{
-    id: number;
-    productId: number;
-    quantity: number;
-    unitPrice: number;
-    lineTotal: number;
-    itemSerialNumber: number | null;
-  }>;
-};
-
-function serviceLabel(value: ServiceType) {
-  switch (value) {
+function serviceTypeLabel(serviceType: ServiceType) {
+  switch (serviceType) {
     case "CLOTHES":
       return "Ρούχα";
     case "CARPETS":
       return "Χαλιά";
     default:
-      return value;
+      return serviceType;
   }
 }
 
-function dateForInput(value: string | null) {
-  if (!value) return "";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toISOString().split("T")[0];
+type EditableGroupedOrderItem = {
+  productId: number | null;
+  productName: string;
+  quantity: number;
+  unitPrice: number | null;
+  lineTotal: number;
+  serials: Array<{
+    id: number;
+    itemSerialNumber: number | null;
+  }>;
+};
+
+function groupOrderItems(
+  orderItems: Array<{
+    id: number;
+    quantity: number;
+    unitPrice: number;
+    lineTotal: number;
+    itemSerialNumber: number | null;
+    product: {
+      id: number;
+      name: string;
+    } | null;
+  }>
+): EditableGroupedOrderItem[] {
+  const map = new Map<string, EditableGroupedOrderItem>();
+
+  for (const item of orderItems) {
+    const key =
+      item.product?.id != null ? String(item.product.id) : `unknown-${item.id}`;
+
+    if (!map.has(key)) {
+      map.set(key, {
+        productId: item.product?.id ?? null,
+        productName: item.product?.name || "-",
+        quantity: 0,
+        unitPrice: item.unitPrice ?? null,
+        lineTotal: 0,
+        serials: [],
+      });
+    }
+
+    const group = map.get(key)!;
+    group.quantity += item.quantity ?? 1;
+    group.lineTotal += item.lineTotal ?? 0;
+    group.serials.push({
+      id: item.id,
+      itemSerialNumber: item.itemSerialNumber,
+    });
+  }
+
+  return Array.from(map.values());
 }
 
-export default function EditOrderPage() {
-  const params = useParams<{ id: string }>();
-  const router = useRouter();
+export default async function EditOrderPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const resolvedParams = await params;
+  const orderId = Number(resolvedParams.id);
 
-  const orderId = Number(params.id);
+  if (!orderId || Number.isNaN(orderId)) {
+    notFound();
+  }
 
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-
-  const [customerId, setCustomerId] = useState("");
-  const [serviceType, setServiceType] = useState<ServiceType>("CLOTHES");
-  const [itemsDescription, setItemsDescription] = useState("");
-  const [squareMeters, setSquareMeters] = useState("");
-  const [paidAmount, setPaidAmount] = useState("");
-  const [deliveryDate, setDeliveryDate] = useState("");
-  const [notes, setNotes] = useState("");
-  const [storageChainNumber, setStorageChainNumber] = useState("");
-
-  const [rows, setRows] = useState<Row[]>([
-    {
-      productId: "",
-      quantity: 1,
-      unitPrice: 0,
-      lineTotal: 0,
-      itemSerialNumber: null,
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: {
+      customer: true,
+      orderItems: {
+        include: {
+          product: true,
+        },
+        orderBy: { id: "asc" },
+      },
     },
-  ]);
+  });
 
-  const [loading, setLoading] = useState(false);
-  const [initialLoading, setInitialLoading] = useState(true);
-
-  useEffect(() => {
-    async function loadData() {
-      try {
-        const [orderRes, customersRes, productsRes] = await Promise.all([
-          fetch(`/api/orders/${orderId}`),
-          fetch("/api/customers/list"),
-          fetch("/api/products/list"),
-        ]);
-
-        if (!orderRes.ok) throw new Error("Order load failed");
-        if (!customersRes.ok) throw new Error("Customers load failed");
-        if (!productsRes.ok) throw new Error("Products load failed");
-
-        const order: OrderResponse = await orderRes.json();
-        const customersData = await customersRes.json();
-        const productsData = await productsRes.json();
-
-        setCustomers(customersData);
-        setProducts(productsData);
-
-        setCustomerId(String(order.customerId));
-        setServiceType(order.serviceType);
-        setItemsDescription(order.itemsDescription || "");
-        setSquareMeters(
-          order.squareMeters != null ? String(order.squareMeters) : ""
-        );
-        setPaidAmount(order.paidAmount != null ? String(order.paidAmount) : "");
-        setDeliveryDate(dateForInput(order.deliveryDate));
-        setNotes(order.notes || "");
-        setStorageChainNumber(order.storageChainNumber || "");
-
-        if (order.orderItems.length > 0) {
-          setRows(
-            order.orderItems.map((item) => ({
-              productId: item.productId,
-              quantity: item.quantity,
-              unitPrice: item.unitPrice,
-              lineTotal: item.lineTotal,
-              itemSerialNumber: item.itemSerialNumber ?? null,
-            }))
-          );
-        } else {
-          setRows([
-            {
-              productId: "",
-              quantity: 1,
-              unitPrice: 0,
-              lineTotal: 0,
-              itemSerialNumber: null,
-            },
-          ]);
-        }
-      } catch (error) {
-        console.error(error);
-        alert("Αποτυχία φόρτωσης παραγγελίας.");
-      } finally {
-        setInitialLoading(false);
-      }
-    }
-
-    if (orderId) {
-      loadData();
-    }
-  }, [orderId]);
-
-  const filteredProducts = useMemo(() => {
-    return products.filter((p) => p.category === serviceType && p.isActive);
-  }, [products, serviceType]);
-
-  function updateRow(index: number, updated: Partial<Row>) {
-    setRows((prev) => {
-      const next = [...prev];
-      next[index] = { ...next[index], ...updated };
-      next[index].lineTotal = next[index].quantity * next[index].unitPrice;
-      return next;
-    });
+  if (!order) {
+    notFound();
   }
 
-  async function reserveItemSerialNumber(): Promise<number | null> {
-    try {
-      const res = await fetch("/api/order-item-serial", {
-        method: "POST",
-      });
+  const customerPagePath = `/customers/${order.customer.id}`;
+  const groupedOrderItems = groupOrderItems(order.orderItems);
 
-      if (!res.ok) return null;
+  async function updateOrder(formData: FormData) {
+  "use server";
 
-      const data = await res.json();
-      return data.itemSerialNumber ?? null;
-    } catch (error) {
-      console.error("reserveItemSerialNumber error:", error);
-      return null;
-    }
+  const existingOrder = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: {
+      id: true,
+      status: true,
+    },
+  });
+
+  if (!existingOrder) {
+    notFound();
   }
 
-  async function handleProductChange(index: number, rawProductId: string) {
-    if (!rawProductId) {
-      updateRow(index, {
-        productId: "",
-        unitPrice: 0,
-        lineTotal: 0,
-        itemSerialNumber: null,
-      });
-      return;
-    }
+  const itemsDescription = String(formData.get("itemsDescription") || "").trim();
+  const squareMetersRaw = String(formData.get("squareMeters") || "").trim();
+  const totalPriceRaw = String(formData.get("totalPrice") || "").trim();
+  const paidAmountRaw = String(formData.get("paidAmount") || "").trim();
+  const pickupDateRaw = String(formData.get("pickupDate") || "").trim();
+  const deliveryDateRaw = String(formData.get("deliveryDate") || "").trim();
+  const notes = String(formData.get("notes") || "").trim();
+  const statusRaw = String(formData.get("status") || "").trim();
 
-    const productId = Number(rawProductId);
-    const product = filteredProducts.find((p) => p.id === productId);
-    if (!product) return;
+  const squareMeters =
+    squareMetersRaw && !Number.isNaN(Number(squareMetersRaw))
+      ? Number(squareMetersRaw)
+      : null;
 
-    let serialToUse = rows[index]?.itemSerialNumber ?? null;
+  const totalPrice =
+    totalPriceRaw && !Number.isNaN(Number(totalPriceRaw))
+      ? Number(totalPriceRaw)
+      : null;
 
-    if (!serialToUse) {
-      serialToUse = await reserveItemSerialNumber();
+  const paidAmount =
+    paidAmountRaw && !Number.isNaN(Number(paidAmountRaw))
+      ? Number(paidAmountRaw)
+      : null;
 
-      if (!serialToUse) {
-        alert("Δεν ήταν δυνατή η δημιουργία μοναδικού αριθμού.");
-        return;
-      }
-    }
+  const pickupDate =
+    pickupDateRaw && !Number.isNaN(Date.parse(pickupDateRaw))
+      ? new Date(pickupDateRaw)
+      : null;
 
-    updateRow(index, {
-      productId,
-      unitPrice: product.unitPrice,
-      itemSerialNumber: serialToUse,
-    });
+  const deliveryDate =
+    deliveryDateRaw && !Number.isNaN(Date.parse(deliveryDateRaw))
+      ? new Date(deliveryDateRaw)
+      : null;
+
+  let nextStatus: OrderStatus = existingOrder.status;
+
+  if (
+    statusRaw === "NEW" ||
+    statusRaw === "PROCESSING" ||
+    statusRaw === "READY" ||
+    statusRaw === "DELIVERED" ||
+    statusRaw === "PAID"
+  ) {
+    nextStatus = statusRaw as OrderStatus;
   }
 
-  function addRow() {
-    setRows((prev) => [
-      ...prev,
-      {
-        productId: "",
-        quantity: 1,
-        unitPrice: 0,
-        lineTotal: 0,
-        itemSerialNumber: null,
-      },
-    ]);
-  }
-
-  function removeRow(index: number) {
-    setRows((prev) => {
-      const next = prev.filter((_, i) => i !== index);
-      return next.length > 0
-        ? next
-        : [
-            {
-              productId: "",
-              quantity: 1,
-              unitPrice: 0,
-              lineTotal: 0,
-              itemSerialNumber: null,
-            },
-          ];
-    });
-  }
-
-  const productsTotal = rows.reduce((sum, row) => sum + row.lineTotal, 0);
-
-  const totalItems = rows.reduce((sum, row) => {
-    if (row.productId === "") return sum;
-    return sum + row.quantity;
-  }, 0);
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-
-    if (!customerId) return;
-
-    setLoading(true);
-
-    const validRows = rows.filter(
-      (row) =>
-        row.productId !== "" &&
-        row.quantity > 0 &&
-        row.unitPrice >= 0 &&
-        row.itemSerialNumber !== null
-    );
-
-    const payload = {
-      customerId: Number(customerId),
-      serviceType,
+  await prisma.order.update({
+    where: { id: orderId },
+    data: {
       itemsDescription: itemsDescription || null,
-      quantity: totalItems > 0 ? totalItems : null,
-      squareMeters: squareMeters ? Number(squareMeters) : null,
-      totalPrice: productsTotal > 0 ? productsTotal : null,
-      paidAmount: paidAmount ? Number(paidAmount) : null,
-      deliveryDate: deliveryDate || null,
+      squareMeters,
+      totalPrice,
+      paidAmount,
+      pickupDate,
+      deliveryDate,
       notes: notes || null,
-      storageChainNumber: storageChainNumber || null,
-      rows: validRows,
-    };
+      status: nextStatus,
+    },
+  });
 
-    const res = await fetch(`/api/orders/${orderId}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
+  revalidatePath(`/orders/${orderId}`);
+  revalidatePath(`/orders/${orderId}/edit`);
+  revalidatePath(customerPagePath);
 
-    if (!res.ok) {
-      setLoading(false);
-      alert("Προέκυψε σφάλμα κατά την ενημέρωση της παραγγελίας.");
-      return;
-    }
-
-    router.push(`/orders/${orderId}`);
-    router.refresh();
-  }
-
-  if (initialLoading) {
-    return (
-      <main className="max-w-4xl">
-        <div className="rounded-2xl border bg-white p-6">Φόρτωση...</div>
-      </main>
-    );
-  }
-
+  redirect(`/orders/${orderId}`);
+}
   return (
-    <main className="max-w-4xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Επεξεργασία Παραγγελίας</h1>
-        <p className="text-gray-600">
-          Μπορείς να προσθέσεις επιπλέον ρούχα ή να διορθώσεις ποσότητες
-        </p>
+    <main className="max-w-5xl space-y-6">
+      <div className="rounded-2xl border bg-white p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold">Επεξεργασία Παραγγελίας #{order.id}</h1>
+            <p className="text-gray-600">
+              {order.customer.fullName} • {order.customer.phone}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-3">
+            <Link href={`/orders/${order.id}`} className={getButtonClass()}>
+              Επιστροφή στην παραγγελία
+            </Link>
+            <Link href={customerPagePath} className={getButtonClass()}>
+              Επιστροφή στον πελάτη
+            </Link>
+          </div>
+        </div>
       </div>
 
       <form
-        onSubmit={handleSubmit}
+        action={updateOrder}
         className="space-y-6 rounded-2xl border bg-white p-6"
       >
-        <div>
-          <label className="mb-1 block text-sm font-medium">Πελάτης</label>
-          <select
-            value={customerId}
-            onChange={(e) => setCustomerId(e.target.value)}
-            required
-            className="w-full rounded-xl border px-6 py-4"
-          >
-            <option value="">Επιλογή πελάτη</option>
-            {customers.map((customer) => (
-              <option key={customer.id} value={customer.id}>
-                {customer.fullName || "Χωρίς όνομα"} - {customer.phone || "-"}
-              </option>
-            ))}
-          </select>
-        </div>
+        <section className="space-y-4">
+          <h2 className="text-lg font-bold">Βασικά στοιχεία</h2>
 
-        <div>
-          <label className="mb-1 block text-sm font-medium">Υπηρεσία</label>
-          <select
-            value={serviceType}
-            onChange={(e) => setServiceType(e.target.value as ServiceType)}
-            required
-            className="w-full rounded-xl border px-4 py-3"
-          >
-            <option value="CLOTHES">Ρούχα</option>
-            <option value="CARPETS">Χαλιά</option>
-          </select>
-        </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-sm font-medium">Πελάτης</label>
+              <input
+                value={order.customer.fullName || ""}
+                readOnly
+                className="w-full rounded-xl border bg-gray-50 px-4 py-3"
+              />
+            </div>
 
-        <div>
-          <label className="mb-1 block text-sm font-medium">
-            Αριθμός μαρκαρίσματος
-          </label>
-          <input
-            value={itemsDescription}
-            onChange={(e) => setItemsDescription(e.target.value)}
-            placeholder="π.χ. Μ-1024 ή 4587"
-            className="w-full rounded-xl border px-4 py-3"
-          />
-        </div>
-
-        <section className="space-y-4 rounded-2xl border p-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold">
-              Προϊόντα {serviceLabel(serviceType)}
-            </h2>
-
-            <button
-              type="button"
-              onClick={addRow}
-              className="rounded-xl border border-black px-4 py-2 text-sm"
-            >
-              + Προσθήκη προϊόντος
-            </button>
+            <div>
+              <label className="mb-1 block text-sm font-medium">Υπηρεσία</label>
+              <input
+                value={serviceTypeLabel(order.serviceType)}
+                readOnly
+                className="w-full rounded-xl border bg-gray-50 px-4 py-3"
+              />
+            </div>
           </div>
 
-          {rows.map((row, index) => (
-            <div
-              key={index}
-              className="grid gap-3 rounded-xl border p-3 md:grid-cols-[1.6fr_120px_110px_140px_120px]"
-            >
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Προϊόν
-                </label>
-                <select
-                  value={row.productId}
-                  onChange={(e) => handleProductChange(index, e.target.value)}
-                  className="w-full rounded-xl border px-4 py-3"
-                >
-                  <option value="">Επιλογή προϊόντος</option>
-                  {filteredProducts.map((product) => (
-                    <option key={product.id} value={product.id}>
-                      {product.name} ({product.unitPrice.toFixed(2)} €)
-                    </option>
-                  ))}
-                </select>
-              </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">
+              Αριθμός μαρκαρίσματος
+            </label>
+            <input
+              name="itemsDescription"
+              defaultValue={order.itemsDescription || ""}
+              className="w-full rounded-xl border px-4 py-3"
+            />
+          </div>
 
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Αριθμός
-                </label>
-                <input
-                  value={row.itemSerialNumber ?? ""}
-                  readOnly
-                  placeholder="Αυτόματο"
-                  className="w-full rounded-xl border bg-gray-50 px-4 py-3"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Ποσότητα
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  value={row.quantity}
-                  onChange={(e) =>
-                    updateRow(index, {
-                      quantity: Number(e.target.value) || 1,
-                    })
-                  }
-                  className="w-full rounded-xl border px-4 py-3"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Τιμή μονάδας
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={row.unitPrice}
-                  readOnly
-                  className="w-full rounded-xl border bg-gray-50 px-4 py-3"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Σύνολο
-                </label>
-                <div className="rounded-xl border bg-gray-50 px-4 py-3">
-                  {row.lineTotal.toFixed(2)} €
-                </div>
-              </div>
-
-              <div className="md:col-span-5">
-                <button
-                  type="button"
-                  onClick={() => removeRow(index)}
-                  className="text-sm text-red-600"
-                >
-                  Αφαίρεση γραμμής
-                </button>
-              </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-sm font-medium">Τετραγωνικά</label>
+              <input
+                name="squareMeters"
+                type="number"
+                min="0"
+                step="0.1"
+                defaultValue={order.squareMeters ?? ""}
+                className="w-full rounded-xl border px-4 py-3"
+              />
             </div>
-          ))}
 
-          <div className="text-right text-lg font-bold">
-            Σύνολο προϊόντων: {productsTotal.toFixed(2)} €
+            <div>
+              <label className="mb-1 block text-sm font-medium">Κατάσταση</label>
+              <select
+                name="status"
+                defaultValue={order.status}
+                className="w-full rounded-xl border px-4 py-3"
+              >
+                <option value="NEW">Νέα</option>
+                <option value="PROCESSING">Σε επεξεργασία</option>
+                <option value="READY">Έτοιμη</option>
+                <option value="DELIVERED">Παραδόθηκε</option>
+                <option value="PAID">Εξοφλημένη</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-sm font-medium">
+                Ημερομηνία παραλαβής
+              </label>
+              <input
+                name="pickupDate"
+                type="date"
+                defaultValue={formatDateForInput(order.pickupDate)}
+                className="w-full rounded-xl border px-4 py-3"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm font-medium">
+                Ημερομηνία παράδοσης
+              </label>
+              <input
+                name="deliveryDate"
+                type="date"
+                defaultValue={formatDateForInput(order.deliveryDate)}
+                className="w-full rounded-xl border px-4 py-3"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium">Σημειώσεις</label>
+            <textarea
+              name="notes"
+              rows={4}
+              defaultValue={order.notes || ""}
+              className="w-full rounded-xl border px-4 py-3"
+            />
           </div>
         </section>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-sm font-medium">Τεμάχια</label>
-            <input
-              value={totalItems > 0 ? totalItems : ""}
-              type="number"
-              readOnly
-              className="w-full rounded-xl border bg-gray-50 px-4 py-3"
-            />
+        <section className="space-y-4">
+          <h2 className="text-lg font-bold">Οικονομικά</h2>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-sm font-medium">Συνολικό ποσό</label>
+              <input
+                name="totalPrice"
+                type="number"
+                min="0"
+                step="0.01"
+                defaultValue={order.totalPrice ?? ""}
+                className="w-full rounded-xl border px-4 py-3"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm font-medium">Πληρωμένο ποσό</label>
+              <input
+                name="paidAmount"
+                type="number"
+                min="0"
+                step="0.01"
+                defaultValue={order.paidAmount ?? ""}
+                className="w-full rounded-xl border px-4 py-3"
+              />
+            </div>
           </div>
+        </section>
 
-          <div>
-            <label className="mb-1 block text-sm font-medium">
-              Τετραγωνικά
-            </label>
-            <input
-              value={squareMeters}
-              onChange={(e) => setSquareMeters(e.target.value)}
-              type="number"
-              min="0"
-              step="0.1"
-              className="w-full rounded-xl border px-4 py-3"
-            />
-          </div>
-        </div>
+        <section className="space-y-4">
+          <h2 className="text-lg font-bold">Προϊόντα παραγγελίας</h2>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-sm font-medium">
-              Συνολικό ποσό
-            </label>
-            <input
-              value={productsTotal > 0 ? productsTotal.toFixed(2) : ""}
-              readOnly
-              className="w-full rounded-xl border bg-gray-50 px-4 py-3"
-            />
-          </div>
+          {groupedOrderItems.length === 0 ? (
+            <div className="rounded-xl border bg-gray-50 p-4 text-gray-500">
+              Δεν υπάρχουν καταχωρημένα προϊόντα.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {groupedOrderItems.map((group, index) => (
+                <div
+                  key={`${group.productId ?? "x"}-${index}`}
+                  className="rounded-xl border bg-gray-50 p-4"
+                >
+                  <div className="grid gap-3 md:grid-cols-4">
+                    <div>
+                      <div className="text-sm text-gray-500">Προϊόν</div>
+                      <div className="font-medium">{group.productName}</div>
+                    </div>
 
-          <div>
-            <label className="mb-1 block text-sm font-medium">
-              Πληρωμένο ποσό
-            </label>
-            <input
-              value={paidAmount}
-              onChange={(e) => setPaidAmount(e.target.value)}
-              type="number"
-              min="0"
-              step="0.01"
-              className="w-full rounded-xl border px-4 py-3"
-            />
-          </div>
-        </div>
+                    <div>
+                      <div className="text-sm text-gray-500">Τεμάχια</div>
+                      <div className="font-medium">{group.quantity}</div>
+                    </div>
 
-        <div>
-          <label className="mb-1 block text-sm font-medium">
-            Ημερομηνία παράδοσης
-          </label>
-          <input
-            value={deliveryDate}
-            onChange={(e) => setDeliveryDate(e.target.value)}
-            type="date"
-            className="w-full rounded-xl border px-4 py-3"
-          />
-        </div>
+                    <div>
+                      <div className="text-sm text-gray-500">Τιμή μονάδας</div>
+                      <div className="font-medium">
+                        {group.unitPrice != null ? `${group.unitPrice.toFixed(2)} €` : "-"}
+                      </div>
+                    </div>
 
-        <div>
-          <label className="mb-1 block text-sm font-medium">
-            Αριθμός αλυσίδας αποθήκης
-          </label>
-          <input
-            value={storageChainNumber}
-            onChange={(e) => setStorageChainNumber(e.target.value)}
-            placeholder="π.χ. A-12 ή 25"
-            className="w-full rounded-xl border px-4 py-3"
-          />
-        </div>
+                    <div>
+                      <div className="text-sm text-gray-500">Σύνολο είδους</div>
+                      <div className="font-medium">{group.lineTotal.toFixed(2)} €</div>
+                    </div>
+                  </div>
 
-        <div>
-          <label className="mb-1 block text-sm font-medium">Σημειώσεις</label>
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            rows={4}
-            className="w-full rounded-xl border px-4 py-3"
-          />
-        </div>
+                  <div className="mt-4">
+                    <div className="mb-2 text-sm font-medium">Μοναδικοί αριθμοί</div>
+                    <div className="flex flex-wrap gap-2">
+                      {group.serials.map((serial) => (
+                        <div
+                          key={serial.id}
+                          className="rounded-xl border bg-white px-3 py-2 text-sm"
+                        >
+                          {serial.itemSerialNumber ?? "-"}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
-        <div className="flex gap-3">
-          <button
-            disabled={loading}
-            className="rounded-xl bg-black px-5 py-3 text-white disabled:opacity-50"
-          >
-            {loading ? "Αποθήκευση..." : "Αποθήκευση αλλαγών"}
+        <div className="flex flex-wrap gap-3">
+          <button type="submit" className={getButtonClass()}>
+            Αποθήκευση αλλαγών
           </button>
 
-          <button
-            type="button"
-            onClick={() => router.push(`/orders/${orderId}`)}
-            className="rounded-xl border border-black px-5 py-3"
-          >
+          <Link href={`/orders/${order.id}`} className={getButtonClass()}>
             Ακύρωση
-          </button>
+          </Link>
         </div>
       </form>
     </main>
