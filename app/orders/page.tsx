@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { formatCurrency, formatDate } from "@/lib/format";
 export const dynamic = "force-dynamic";
+
 const statusLabels: Record<string, string> = {
   NEW: "Νέα",
   PROCESSING: "Σε επεξεργασία",
