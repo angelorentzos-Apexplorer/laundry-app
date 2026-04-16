@@ -65,16 +65,29 @@ async function createCustomer(formData: FormData) {
     redirect(`/orders/new?customerId=${customer.id}`);
   }
 
-  redirect(`/customers/${customer.id}`);
+  redirect("/customers/new?saved=1");
 }
 
-export default function NewCustomerPage() {
+export default async function NewCustomerPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ saved?: string }>;
+}) {
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const saved = String(resolvedSearchParams?.saved || "") === "1";
+
   return (
     <main className="max-w-4xl space-y-6">
       <div className="rounded-2xl border bg-white p-6">
         <h1 className="text-2xl font-bold">Νέος Πελάτης</h1>
         <p className="text-gray-600">Καταχώρηση νέου πελάτη</p>
       </div>
+
+      {saved ? (
+        <div className="rounded-2xl border border-green-200 bg-green-50 p-4 text-green-700">
+          Ο πελάτης αποθηκεύτηκε επιτυχώς.
+        </div>
+      ) : null}
 
       <form
         action={createCustomer}
