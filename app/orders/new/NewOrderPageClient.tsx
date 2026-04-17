@@ -75,19 +75,68 @@ function getTodayForInput() {
   return `${year}-${month}-${day}`;
 }
 
-function getPreviewBase(serviceType: ServiceType) {
-  return serviceType === "CARPETS" ? 22000 : 1000;
+function getEmptyRow(): Row {
+  return {
+    productId: "",
+    quantity: 1,
+    unitPrice: 0,
+    lineTotal: 0,
+    itemSerialNumbers: [],
+  };
 }
 
-function getPreviewSerials(
-  serviceType: ServiceType,
-  rowIndex: number,
-  quantity: number
-) {
-  const base = getPreviewBase(serviceType);
+async function fetchNextSerialStart(
+  serviceType: ServiceType
+): Promise<number | null> {
+  try {
+    const res = await fetch("/api/order-item-serial", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ serviceType }),
+    });
 
-  return Array.from({ length: quantity }, (_, i) => {
-    return base + rowIndex * 100 + i;
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    return typeof data.itemSerialNumber === "number"
+      ? data.itemSerialNumber
+      : null;
+  } catch (error) {
+    console.error("fetchNextSerialStart error:", error);
+    return null;
+  }
+}
+
+function recalculateSerialPreviews(rows: Row[], start: number | null): Row[] {
+  if (start == null) {
+    return rows.map((row) => ({
+      ...row,
+      itemSerialNumbers: row.productId !== "" ? [] : [],
+    }));
+  }
+
+  let currentSerial = start;
+
+  return rows.map((row) => {
+    if (row.productId === "") {
+      return {
+        ...row,
+        itemSerialNumbers: [],
+      };
+    }
+
+    const serials = Array.from(
+      { length: row.quantity },
+      (_, i) => currentSerial + i
+    );
+    currentSerial += row.quantity;
+
+    return {
+      ...row,
+      itemSerialNumbers: serials,
+    };
   });
 }
 
@@ -113,16 +162,9 @@ export default function NewOrderPageClient() {
   const [pickupDate, setPickupDate] = useState(getTodayForInput());
   const [deliveryDate, setDeliveryDate] = useState("");
   const [notes, setNotes] = useState("");
+  const [nextSerialStart, setNextSerialStart] = useState<number | null>(null);
 
-  const [rows, setRows] = useState<Row[]>([
-    {
-      productId: "",
-      quantity: 1,
-      unitPrice: 0,
-      lineTotal: 0,
-      itemSerialNumbers: [],
-    },
-  ]);
+  const [rows, setRows] = useState<Row[]>([getEmptyRow()]);
 
   const [loading, setLoading] = useState(false);
 
@@ -151,6 +193,15 @@ export default function NewOrderPageClient() {
 
     loadData();
   }, []);
+
+  useEffect(() => {
+    async function loadNextSerialStart() {
+      const next = await fetchNextSerialStart(serviceType);
+      setNextSerialStart(next);
+    }
+
+    loadNextSerialStart();
+  }, [serviceType]);
 
   useEffect(() => {
     if (!customerId || customers.length === 0) return;
@@ -200,7 +251,7 @@ export default function NewOrderPageClient() {
       const next = [...prev];
       next[index] = { ...next[index], ...updated };
       next[index].lineTotal = next[index].quantity * next[index].unitPrice;
-      return next;
+      return recalculateSerialPreviews(next, nextSerialStart);
     });
   }
 
@@ -219,42 +270,24 @@ export default function NewOrderPageClient() {
     const product = filteredProducts.find((p) => p.id === productId);
     if (!product) return;
 
-    const quantity = rows[index]?.quantity || 1;
-
     updateRow(index, {
       productId,
       unitPrice: product.unitPrice,
-      itemSerialNumbers: getPreviewSerials(serviceType, index, quantity),
     });
   }
 
   function addRow() {
-    setRows((prev) => [
-      ...prev,
-      {
-        productId: "",
-        quantity: 1,
-        unitPrice: 0,
-        lineTotal: 0,
-        itemSerialNumbers: [],
-      },
-    ]);
+    setRows((prev) =>
+      recalculateSerialPreviews([...prev, getEmptyRow()], nextSerialStart)
+    );
   }
 
   function removeRow(index: number) {
     setRows((prev) => {
       const next = prev.filter((_, i) => i !== index);
-      return next.length > 0
-        ? next
-        : [
-            {
-              productId: "",
-              quantity: 1,
-              unitPrice: 0,
-              lineTotal: 0,
-              itemSerialNumbers: [],
-            },
-          ];
+      const safeNext: Row[] = next.length > 0 ? next : [getEmptyRow()];
+
+      return recalculateSerialPreviews(safeNext, nextSerialStart);
     });
   }
 
@@ -269,16 +302,12 @@ export default function NewOrderPageClient() {
   }
 
   useEffect(() => {
-    setRows([
-      {
-        productId: "",
-        quantity: 1,
-        unitPrice: 0,
-        lineTotal: 0,
-        itemSerialNumbers: [],
-      },
-    ]);
+    setRows([getEmptyRow()]);
   }, [serviceType]);
+
+  useEffect(() => {
+    setRows((prev) => recalculateSerialPreviews(prev, nextSerialStart));
+  }, [nextSerialStart]);
 
   const productsTotal = rows.reduce((sum, row) => sum + row.lineTotal, 0);
 
@@ -320,54 +349,74 @@ export default function NewOrderPageClient() {
       })),
     };
 
-    const res = await fetch("/api/orders", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
+    try {
+      const res = await fetch("/api/orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
 
-    if (!res.ok) {
+      if (!res.ok) {
+        setLoading(false);
+        alert("Προέκυψε σφάλμα κατά την αποθήκευση της παραγγελίας.");
+        return;
+      }
+
+      const createdOrder = await res.json();
+
+      const selectedCustomer = customers.find(
+        (c) => String(c.id) === customerId
+      );
+
+      const receiptRows: ReceiptRow[] = (createdOrder.orderItems || []).map(
+        (row: any) => {
+          const matchedProduct = products.find((p) => p.id === row.productId);
+
+          return {
+            productId: Number(row.productId),
+            productName: matchedProduct?.name || `Προϊόν #${row.productId}`,
+            quantity: row.quantity,
+            unitPrice: row.unitPrice,
+            lineTotal: row.lineTotal,
+            itemSerialNumber: row.itemSerialNumber,
+          };
+        }
+      );
+
+      setReceipt({
+        orderId: createdOrder.id,
+        customerName: selectedCustomer?.fullName || "Χωρίς όνομα",
+        customerPhone: selectedCustomer?.phone || "-",
+        serviceType,
+        markingNumber: itemsDescription || "-",
+        pickupDate: pickupDate || "",
+        deliveryDate: deliveryDate || "",
+        totalItems,
+        totalPrice: productsTotal,
+        rows: receiptRows,
+        createdAt: createdOrder.createdAt || new Date().toISOString(),
+      });
+
+      const freshNextSerial = await fetchNextSerialStart(serviceType);
+      setNextSerialStart(freshNextSerial);
+
+      setRows(recalculateSerialPreviews([getEmptyRow()], freshNextSerial));
+
+      setItemsDescription("");
+      setSquareMeters("");
+      setPaidAmount("");
+      setPickupDate(getTodayForInput());
+      setDeliveryDate("");
+      setNotes("");
+
+      setLoading(false);
+    } catch (error) {
+      console.error("Create order error:", error);
       setLoading(false);
       alert("Προέκυψε σφάλμα κατά την αποθήκευση της παραγγελίας.");
-      return;
     }
-
-    const createdOrder = await res.json();
-
-    const selectedCustomer = customers.find((c) => String(c.id) === customerId);
-
-    const receiptRows: ReceiptRow[] = (createdOrder.orderItems || []).map(
-      (row: any) => {
-        const matchedProduct = products.find((p) => p.id === row.productId);
-
-        return {
-          productId: Number(row.productId),
-          productName: matchedProduct?.name || `Προϊόν #${row.productId}`,
-          quantity: row.quantity,
-          unitPrice: row.unitPrice,
-          lineTotal: row.lineTotal,
-          itemSerialNumber: row.itemSerialNumber,
-        };
-      }
-    );
-
-    setReceipt({
-      orderId: createdOrder.id,
-      customerName: selectedCustomer?.fullName || "Χωρίς όνομα",
-      customerPhone: selectedCustomer?.phone || "-",
-      serviceType,
-      markingNumber: itemsDescription || "-",
-      pickupDate: pickupDate || "",
-      deliveryDate: deliveryDate || "",
-      totalItems,
-      totalPrice: productsTotal,
-      rows: receiptRows,
-      createdAt: createdOrder.createdAt || new Date().toISOString(),
-    });
-
-    setLoading(false);
   }
 
   function handlePrintReceipt() {
@@ -527,13 +576,8 @@ export default function NewOrderPageClient() {
                   value={row.quantity}
                   onChange={(e) => {
                     const nextQuantity = Number(e.target.value) || 1;
-
                     updateRow(index, {
                       quantity: nextQuantity,
-                      itemSerialNumbers:
-                        row.productId !== ""
-                          ? getPreviewSerials(serviceType, index, nextQuantity)
-                          : [],
                     });
                   }}
                   className="w-full rounded-xl border px-4 py-3"
@@ -774,7 +818,7 @@ export default function NewOrderPageClient() {
                 {receipt.rows.map((row, index) => (
                   <div
                     key={`${row.productId}-${index}-${row.itemSerialNumber ?? "x"}`}
-                    className="rounded-lg border p-2 text-[11px]"
+                    className="py-1 text-[11px]"
                   >
                     <div className="font-medium">{row.productName}</div>
                     <div className="text-[10px] text-gray-600">
