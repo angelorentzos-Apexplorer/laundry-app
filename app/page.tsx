@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
 function getButtonClass() {
   return "rounded-xl border border-black bg-white px-3 py-2 text-black transition duration-150 hover:bg-gray-100 active:scale-[0.98] active:bg-black active:text-white";
 }
@@ -29,6 +31,25 @@ function startOfMonth(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
 }
 
+function normalizePhoneSearch(q: string) {
+  const digits = q.replace(/\D/g, "");
+
+  if (!digits) return [];
+
+  const variants = new Set<string>();
+
+  variants.add(q);
+  variants.add(digits);
+
+  if (digits.startsWith("30")) {
+    variants.add(`+${digits}`);
+  } else {
+    variants.add(`+30${digits.replace(/^0+/, "")}`);
+  }
+
+  return Array.from(variants);
+}
+
 export default async function HomePage({
   searchParams,
 }: {
@@ -39,6 +60,7 @@ export default async function HomePage({
 
   const numericQuery = Number(q);
   const isNumeric = q !== "" && !Number.isNaN(numericQuery);
+  const phoneVariants = normalizePhoneSearch(q);
 
   const now = new Date();
   const dayStart = startOfDay(now);
@@ -140,9 +162,11 @@ export default async function HomePage({
       prisma.customer.findMany({
         where: {
           OR: [
-            { lastName: { contains: q } },
-            { fullName: { contains: q } },
-            { phone: { contains: q } },
+            { lastName: { contains: q, mode: "insensitive" } },
+            { fullName: { contains: q, mode: "insensitive" } },
+            ...phoneVariants.map((phone) => ({
+              phone: { contains: phone },
+            })),
           ],
         },
         select: {
@@ -155,10 +179,12 @@ export default async function HomePage({
         take: 20,
         orderBy: { createdAt: "desc" },
       }),
+
       prisma.order.findMany({
         where: {
           OR: [
             ...(isNumeric ? [{ id: numericQuery }] : []),
+
             ...(isNumeric
               ? [
                   {
@@ -170,24 +196,28 @@ export default async function HomePage({
                   },
                 ]
               : []),
-            { storageChainNumber: { contains: q } },
-            { itemsDescription: { contains: q } },
-            { notes: { contains: q } },
+
+            { storageChainNumber: { contains: q, mode: "insensitive" } },
+            { itemsDescription: { contains: q, mode: "insensitive" } },
+            { notes: { contains: q, mode: "insensitive" } },
+
             {
               customer: {
-                fullName: { contains: q },
+                fullName: { contains: q, mode: "insensitive" },
               },
             },
+
             {
               customer: {
-                lastName: { contains: q },
+                lastName: { contains: q, mode: "insensitive" },
               },
             },
-            {
+
+            ...phoneVariants.map((phone) => ({
               customer: {
-                phone: { contains: q },
+                phone: { contains: phone },
               },
-            },
+            })),
           ],
         },
         select: {
@@ -253,7 +283,7 @@ export default async function HomePage({
             type="text"
             name="q"
             defaultValue={q}
-            placeholder="Πληκτρολόγησε επώνυμο, τηλέφωνο, Νο αποθήκευσης, περιγραφή ή 4ψήφιο αριθμό..."
+            placeholder="Πληκτρολόγησε επώνυμο, τηλέφωνο, Νο αποθήκευσης, περιγραφή ή αριθμό προϊόντος..."
             className="w-full rounded-xl border px-4 py-3 outline-none transition focus:border-black"
           />
 
@@ -306,7 +336,9 @@ export default async function HomePage({
                         <div>
                           <div className="text-lg font-bold">
                             {customer.fullName ||
-                              `${customer.firstName || ""} ${customer.lastName || ""}`.trim() ||
+                              `${customer.firstName || ""} ${
+                                customer.lastName || ""
+                              }`.trim() ||
                               `Πελάτης #${customer.id}`}
                           </div>
                           <div className="text-sm text-gray-600">
@@ -355,7 +387,9 @@ export default async function HomePage({
                             <div className="text-sm text-gray-600">
                               Πελάτης:{" "}
                               {order.customer.fullName ||
-                                `${order.customer.firstName || ""} ${order.customer.lastName || ""}`.trim() ||
+                                `${order.customer.firstName || ""} ${
+                                  order.customer.lastName || ""
+                                }`.trim() ||
                                 `Πελάτης #${order.customer.id}`}
                             </div>
                             <div className="text-sm text-gray-600">
