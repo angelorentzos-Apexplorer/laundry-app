@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 
@@ -36,18 +37,46 @@ function normalizePhoneSearch(q: string) {
 
   if (!digits) return [];
 
-  const variants = new Set<string>();
+  const withoutCountryCode = digits.startsWith("30")
+    ? digits.slice(2)
+    : digits.replace(/^0+/, "");
 
-  variants.add(q);
-  variants.add(digits);
+  return Array.from(
+    new Set(
+      [
+        q,
+        digits,
+        withoutCountryCode,
+        `30${withoutCountryCode}`,
+        `+30${withoutCountryCode}`,
+      ].filter(Boolean)
+    )
+  );
+}
 
-  if (digits.startsWith("30")) {
-    variants.add(`+${digits}`);
-  } else {
-    variants.add(`+30${digits.replace(/^0+/, "")}`);
-  }
+async function findCustomerIdsByPhone(q: string) {
+  const variants = normalizePhoneSearch(q).map((v) =>
+    String(v).replace(/\D/g, "")
+  );
 
-  return Array.from(variants);
+  const cleanVariants = Array.from(new Set(variants.filter(Boolean)));
+
+  if (cleanVariants.length === 0) return [];
+
+  const rows = await prisma.$queryRaw<Array<{ id: number }>>`
+    SELECT "id"
+    FROM "Customer"
+    WHERE ${Prisma.join(
+      cleanVariants.map(
+        (v) =>
+          Prisma.sql`regexp_replace(COALESCE("phone", ''), '[^0-9]', '', 'g') LIKE ${`%${v}%`}`
+      ),
+      " OR "
+    )}
+    LIMIT 50
+  `;
+
+  return rows.map((row) => row.id);
 }
 
 export default async function HomePage({
@@ -158,6 +187,8 @@ export default async function HomePage({
   }> = [];
 
   if (q) {
+    const phoneCustomerIds = await findCustomerIdsByPhone(q);
+
     [customerResults, orderResults] = await Promise.all([
       prisma.customer.findMany({
         where: {
@@ -167,6 +198,9 @@ export default async function HomePage({
             ...phoneVariants.map((phone) => ({
               phone: { contains: phone },
             })),
+            ...(phoneCustomerIds.length > 0
+              ? [{ id: { in: phoneCustomerIds } }]
+              : []),
           ],
         },
         select: {
@@ -195,6 +229,10 @@ export default async function HomePage({
                     },
                   },
                 ]
+              : []),
+
+            ...(phoneCustomerIds.length > 0
+              ? [{ customerId: { in: phoneCustomerIds } }]
               : []),
 
             { storageChainNumber: { contains: q, mode: "insensitive" } },
