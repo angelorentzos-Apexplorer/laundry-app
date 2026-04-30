@@ -62,7 +62,13 @@ export default async function HomePage({
   const q = String(resolvedSearchParams?.q || "").trim();
 
   const numericQuery = Number(q);
-  const isNumeric = q !== "" && !Number.isNaN(numericQuery);
+
+  const isNumeric =
+    q !== "" && !Number.isNaN(numericQuery) && Number.isInteger(numericQuery);
+
+  const isDbInt =
+    isNumeric && numericQuery > 0 && numericQuery <= 2147483647;
+
   const phoneVariants = normalizePhoneSearch(q);
 
   const now = new Date();
@@ -162,9 +168,9 @@ export default async function HomePage({
       prisma.order.findMany({
         where: {
           OR: [
-            ...(isNumeric ? [{ id: numericQuery }] : []),
+            ...(isDbInt ? [{ id: numericQuery }] : []),
 
-            ...(isNumeric
+            ...(isDbInt
               ? [
                   {
                     orderItems: {
@@ -346,7 +352,7 @@ export default async function HomePage({
                 <div className="space-y-3">
                   {orderResults.map((order) => {
                     const matchedItem =
-                      isNumeric && order.orderItems.length > 0
+                      isDbInt && order.orderItems.length > 0
                         ? order.orderItems.find(
                             (item) => item.itemSerialNumber === numericQuery
                           )
