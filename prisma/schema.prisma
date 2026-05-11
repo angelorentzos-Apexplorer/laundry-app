@@ -92,6 +92,7 @@ model OrderItem {
 enum ServiceType {
   CLOTHES
   CARPETS
+  LINEN
 }
 
 enum OrderStatus {
@@ -105,6 +106,7 @@ enum OrderStatus {
 enum ProductType {
   CLOTHES
   CARPETS
+  LINEN
 }
 
 enum DeliveryStatus {

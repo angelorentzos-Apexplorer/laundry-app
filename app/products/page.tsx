@@ -18,6 +18,8 @@ function categoryLabel(category: string) {
       return "Ρούχα";
     case "CARPETS":
       return "Χαλιά";
+    case "LINEN":
+      return "Ιματισμός";
     default:
       return category;
   }

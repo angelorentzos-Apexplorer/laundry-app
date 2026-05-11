@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ServiceType, ProductType } from "@prisma/client";
+import { ProductType, ServiceType } from "@prisma/client";
 
 type Customer = {
   id: number;
@@ -55,6 +55,8 @@ function serviceLabel(value: ServiceType) {
       return "Ρούχα";
     case "CARPETS":
       return "Χαλιά";
+    case "LINEN":
+      return "Ιματισμός";
     default:
       return value;
   }
@@ -109,11 +111,15 @@ async function fetchNextSerialStart(
   }
 }
 
-function recalculateSerialPreviews(rows: Row[], start: number | null): Row[] {
+function recalculateSerialPreviews(
+  rows: Row[],
+  start: number | null,
+  serviceType: ServiceType
+): Row[] {
   if (start == null) {
     return rows.map((row) => ({
       ...row,
-      itemSerialNumbers: row.productId !== "" ? [] : [],
+      itemSerialNumbers: [],
     }));
   }
 
@@ -127,11 +133,14 @@ function recalculateSerialPreviews(rows: Row[], start: number | null): Row[] {
       };
     }
 
+    const serialCount = serviceType === "LINEN" ? 1 : row.quantity;
+
     const serials = Array.from(
-      { length: row.quantity },
+      { length: serialCount },
       (_, i) => currentSerial + i
     );
-    currentSerial += row.quantity;
+
+    currentSerial += serialCount;
 
     return {
       ...row,
@@ -165,7 +174,6 @@ export default function NewOrderPageClient() {
   const [nextSerialStart, setNextSerialStart] = useState<number | null>(null);
 
   const [rows, setRows] = useState<Row[]>([getEmptyRow()]);
-
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -251,7 +259,8 @@ export default function NewOrderPageClient() {
       const next = [...prev];
       next[index] = { ...next[index], ...updated };
       next[index].lineTotal = next[index].quantity * next[index].unitPrice;
-      return recalculateSerialPreviews(next, nextSerialStart);
+
+      return recalculateSerialPreviews(next, nextSerialStart, serviceType);
     });
   }
 
@@ -278,7 +287,11 @@ export default function NewOrderPageClient() {
 
   function addRow() {
     setRows((prev) =>
-      recalculateSerialPreviews([...prev, getEmptyRow()], nextSerialStart)
+      recalculateSerialPreviews(
+        [...prev, getEmptyRow()],
+        nextSerialStart,
+        serviceType
+      )
     );
   }
 
@@ -287,7 +300,7 @@ export default function NewOrderPageClient() {
       const next = prev.filter((_, i) => i !== index);
       const safeNext: Row[] = next.length > 0 ? next : [getEmptyRow()];
 
-      return recalculateSerialPreviews(safeNext, nextSerialStart);
+      return recalculateSerialPreviews(safeNext, nextSerialStart, serviceType);
     });
   }
 
@@ -306,8 +319,10 @@ export default function NewOrderPageClient() {
   }, [serviceType]);
 
   useEffect(() => {
-    setRows((prev) => recalculateSerialPreviews(prev, nextSerialStart));
-  }, [nextSerialStart]);
+    setRows((prev) =>
+      recalculateSerialPreviews(prev, nextSerialStart, serviceType)
+    );
+  }, [nextSerialStart, serviceType]);
 
   const productsTotal = rows.reduce((sum, row) => sum + row.lineTotal, 0);
 
@@ -402,7 +417,9 @@ export default function NewOrderPageClient() {
       const freshNextSerial = await fetchNextSerialStart(serviceType);
       setNextSerialStart(freshNextSerial);
 
-      setRows(recalculateSerialPreviews([getEmptyRow()], freshNextSerial));
+      setRows(
+        recalculateSerialPreviews([getEmptyRow()], freshNextSerial, serviceType)
+      );
 
       setItemsDescription("");
       setSquareMeters("");
@@ -428,7 +445,7 @@ export default function NewOrderPageClient() {
       <div className="no-print">
         <h1 className="text-2xl font-bold">Νέα Παραγγελία</h1>
         <p className="text-gray-600">
-          Καταχώρηση παραγγελίας για ρούχα ή χαλιά
+          Καταχώρηση παραγγελίας για ρούχα, χαλιά ή ιματισμό
         </p>
       </div>
 
@@ -491,6 +508,7 @@ export default function NewOrderPageClient() {
           >
             <option value="CLOTHES">Ρούχα</option>
             <option value="CARPETS">Χαλιά</option>
+            <option value="LINEN">Ιματισμός</option>
           </select>
         </div>
 
@@ -566,10 +584,19 @@ export default function NewOrderPageClient() {
                     />
                   )}
                 </div>
+
+                {serviceType === "LINEN" && row.productId !== "" ? (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Στον ιματισμό δίνεται ένας αριθμός ανά προϊόν, ανεξάρτητα από
+                    την ποσότητα.
+                  </p>
+                ) : null}
               </div>
 
               <div>
-                <label className="mb-1 block text-sm font-medium">Ποσότητα</label>
+                <label className="mb-1 block text-sm font-medium">
+                  Ποσότητα
+                </label>
                 <input
                   type="number"
                   min="1"
@@ -748,182 +775,6 @@ export default function NewOrderPageClient() {
           </button>
         </div>
       )}
-
-      {receipt && (
-        <section className="print-receipt mt-8 rounded-2xl border bg-white p-4 text-[12px] leading-tight">
-          <div className="mb-3 text-center">
-            <img
-              src="/logo.png"
-              alt="Logo"
-              className="mx-auto mb-2 h-12 w-auto object-contain"
-            />
-            <h2 className="text-base font-bold">ΔΕΛΤΙΟ ΠΑΡΑΛΑΒΗΣ</h2>
-            <p className="text-[11px] text-gray-600">Laundry Admin</p>
-          </div>
-
-          <div className="space-y-1 text-[11px]">
-            <div>
-              <span className="font-medium">Αρ. παραγγελίας:</span> #
-              {receipt.orderId}
-            </div>
-            <div>
-              <span className="font-medium">Ημερομηνία καταχώρησης:</span>{" "}
-              {formatGreekDate(receipt.createdAt)}
-            </div>
-            <div>
-              <span className="font-medium">Πελάτης:</span>{" "}
-              {receipt.customerName}
-            </div>
-            <div>
-              <span className="font-medium">Τηλέφωνο:</span>{" "}
-              {receipt.customerPhone}
-            </div>
-            <div>
-              <span className="font-medium">Υπηρεσία:</span>{" "}
-              {receipt.serviceType === "CLOTHES" ? "Ρούχα" : "Χαλιά"}
-            </div>
-            <div>
-              <span className="font-medium">Τεμάχια:</span>{" "}
-              {receipt.totalItems}
-            </div>
-            <div>
-              <span className="font-medium">Αρ. μαρκαρίσματος:</span>{" "}
-              {receipt.markingNumber}
-            </div>
-            <div>
-              <span className="font-medium">Ημερομηνία παραλαβής:</span>{" "}
-              {formatGreekDate(receipt.pickupDate)}
-            </div>
-            <div>
-              <span className="font-medium">Ημερομηνία παράδοσης:</span>{" "}
-              {formatGreekDate(receipt.deliveryDate)}
-            </div>
-            <div>
-              <span className="font-medium">Συνολικό ποσό:</span>{" "}
-              {receipt.totalPrice.toFixed(2)} €
-            </div>
-          </div>
-
-          <div className="my-3 border-t border-dashed border-black" />
-
-          <div>
-            <h3 className="mb-2 text-sm font-bold">Είδη</h3>
-
-            {receipt.rows.length === 0 ? (
-              <div className="text-[11px] text-gray-500">
-                Δεν υπάρχουν καταχωρημένα είδη.
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {receipt.rows.map((row, index) => (
-                  <div
-                    key={`${row.productId}-${index}-${row.itemSerialNumber ?? "x"}`}
-                    className="py-1 text-[11px]"
-                  >
-                    <div className="font-medium">{row.productName}</div>
-                    <div className="text-[10px] text-gray-600">
-                      Αριθμός: {row.itemSerialNumber ?? "-"}
-                    </div>
-                    <div className="mt-1 flex justify-between">
-                      <span>Ποσ.: {row.quantity}</span>
-                      <span>{row.lineTotal.toFixed(2)} €</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="my-3 border-t border-dashed border-black" />
-
-          <div className="mt-6 grid grid-cols-2 gap-4 pt-6">
-            <div className="border-t pt-1 text-center text-[10px]">
-              Υπογραφή πελάτη
-            </div>
-            <div className="border-t pt-1 text-center text-[10px]">
-              Υπογραφή καταστήματος
-            </div>
-          </div>
-        </section>
-      )}
-
-      <style jsx global>{`
-        .print-receipt {
-          display: none;
-        }
-
-        @media print {
-          html,
-          body {
-            background: white !important;
-            width: 58mm;
-            margin: 0;
-            padding: 0;
-            font-family: Arial, sans-serif;
-          }
-
-          .no-print,
-          header,
-          nav,
-          aside,
-          [role="navigation"],
-          .navbar,
-          .navibar,
-          .sidebar {
-            display: none !important;
-          }
-
-          .print-receipt {
-            display: block !important;
-            width: 58mm !important;
-            max-width: 58mm !important;
-            min-width: 58mm !important;
-            margin: 0 !important;
-            padding: 2mm !important;
-            border: none !important;
-            box-shadow: none !important;
-            border-radius: 0 !important;
-            font-size: 11px !important;
-            line-height: 1.25 !important;
-            color: #000 !important;
-          }
-
-          .print-receipt * {
-            color: #000 !important;
-          }
-
-          .print-receipt img {
-            display: block !important;
-            margin: 0 auto 6px auto !important;
-            max-width: 120px !important;
-            max-height: 45px !important;
-            width: auto !important;
-            height: auto !important;
-          }
-
-          .print-receipt h2 {
-            font-size: 15px !important;
-            margin: 0 0 4px 0 !important;
-          }
-
-          .print-receipt h3 {
-            font-size: 12px !important;
-            margin: 0 0 4px 0 !important;
-          }
-
-          main {
-            max-width: 58mm !important;
-            width: 58mm !important;
-            margin: 0 !important;
-            padding: 0 !important;
-          }
-
-          @page {
-            size: 58mm auto;
-            margin: 0;
-          }
-        }
-      `}</style>
     </main>
   );
 }

@@ -14,9 +14,12 @@ async function getNextSerial(
   const sequenceKey =
     serviceType === "CARPETS"
       ? "order_item_serial_carpets"
-      : "order_item_serial_clothes";
+      : serviceType === "LINEN"
+        ? "order_item_serial_linen"
+        : "order_item_serial_clothes";
 
-  const startValue = serviceType === "CARPETS" ? 22000 : 1000;
+  const startValue =
+    serviceType === "CARPETS" ? 22000 : serviceType === "LINEN" ? 50000 : 1000;
 
   const existing = await tx.appSequence.findUnique({
     where: { key: sequenceKey },
@@ -29,6 +32,7 @@ async function getNextSerial(
         value: startValue,
       },
     });
+
     return startValue;
   }
 
@@ -55,11 +59,13 @@ export async function POST(req: Request) {
 
     if (
       serviceType !== ServiceType.CLOTHES &&
-      serviceType !== ServiceType.CARPETS
+      serviceType !== ServiceType.CARPETS &&
+      serviceType !== ServiceType.LINEN
     ) {
       return Response.json({ error: "Μη έγκυρη υπηρεσία." }, { status: 400 });
     }
 
+    const typedServiceType = serviceType as ServiceType;
     const rows = Array.isArray(body.rows) ? body.rows : [];
 
     const validRows = rows.filter((row: any) => {
@@ -138,17 +144,31 @@ export async function POST(req: Request) {
       for (const row of validRows) {
         const quantity = Number(row.quantity);
         const unitPrice = Number(row.unitPrice);
+        const lineTotal = Number(row.lineTotal);
+        const productId = Number(row.productId);
 
-        for (let i = 0; i < quantity; i++) {
-          const realSerial = await getNextSerial(tx, serviceType as ServiceType);
+        if (typedServiceType === ServiceType.LINEN) {
+          const realSerial = await getNextSerial(tx, typedServiceType);
 
           rowsWithRealSerials.push({
-            productId: Number(row.productId),
-            quantity: 1,
+            productId,
+            quantity,
             unitPrice,
-            lineTotal: unitPrice,
+            lineTotal,
             itemSerialNumber: realSerial,
           });
+        } else {
+          for (let i = 0; i < quantity; i++) {
+            const realSerial = await getNextSerial(tx, typedServiceType);
+
+            rowsWithRealSerials.push({
+              productId,
+              quantity: 1,
+              unitPrice,
+              lineTotal: unitPrice,
+              itemSerialNumber: realSerial,
+            });
+          }
         }
       }
 
@@ -157,7 +177,7 @@ export async function POST(req: Request) {
           customer: {
             connect: { id: customerId },
           },
-          serviceType: serviceType as ServiceType,
+          serviceType: typedServiceType,
           itemsDescription: body.itemsDescription || null,
           quantity: totalItems > 0 ? totalItems : null,
           squareMeters:
