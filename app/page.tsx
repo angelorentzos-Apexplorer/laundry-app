@@ -247,6 +247,7 @@ export default async function HomePage({
   const hasResults = customerResults.length > 0 || orderResults.length > 0;
 
   return (
+  
     <main className="space-y-8">
       <section className="space-y-5 rounded-2xl border bg-white p-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -418,13 +419,13 @@ export default async function HomePage({
           </div>
         )}
       </section>
-
-      <div>
+<div>
         <h1 className="text-3xl font-bold">Dashboard</h1>
         <p className="mt-2 text-gray-600">
           Εφαρμογή παραγγελιοληψίας για καθαριστήριο ρούχων και χαλιών.
         </p>
       </div>
+      
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {cards.map((card) => (
