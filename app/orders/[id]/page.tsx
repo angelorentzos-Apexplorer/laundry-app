@@ -5,6 +5,7 @@ import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import OrderItemStorageForm from "./OrderItemStorageForm";
 import OrderStatusActions from "./OrderStatusActions";
+import DeleteOrderButton from "./DeleteOrderButton";
 
 function formatMoney(value: number | null | undefined) {
   if (value == null) return "-";
@@ -575,21 +576,7 @@ export default async function OrderPage({
             </a>
             {order.status !== "PAID" && order.status !== "DELIVERED" ? (
   <form action={deleteOrder}>
-    <button
-  type="submit"
-  onClick={(e) => {
-    const confirmed = window.confirm(
-      "Είστε σίγουροι ότι θέλετε να διαγράψετε την εγγραφή;"
-    );
-
-    if (!confirmed) {
-      e.preventDefault();
-    }
-  }}
-  className="rounded-xl border border-red-600 bg-white px-4 py-3 text-red-600 transition duration-150 hover:bg-red-50 active:scale-[0.98] active:bg-red-600 active:text-white"
->
-  Διαγραφή παραγγελίας
-</button>
+    <DeleteOrderButton />
   </form>
 ) : null}
 
