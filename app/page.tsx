@@ -86,7 +86,11 @@ export default async function HomePage({
     paymentsTodayAgg,
     paymentsMonthAgg,
   ] = await Promise.all([
-    prisma.order.count(),
+    prisma.order.count({
+  where: {
+    isDeleted: false,
+  },
+}),
     prisma.order.count({ where: { status: "NEW" } }),
     prisma.order.count({ where: { status: "READY" } }),
     prisma.customer.count(),
@@ -166,7 +170,8 @@ export default async function HomePage({
       }),
 
       prisma.order.findMany({
-        where: {
+  where: {
+    isDeleted: false,
           OR: [
             ...(isDbInt ? [{ id: numericQuery }] : []),
 

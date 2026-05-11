@@ -74,6 +74,9 @@ export default async function CustomerPage({
     where: { id: customerId },
     include: {
       orders: {
+  where: {
+    isDeleted: false,
+  },
         include: {
           payments: {
             orderBy: { paymentDate: "desc" },

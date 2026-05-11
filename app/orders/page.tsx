@@ -56,37 +56,39 @@ export default async function OrdersPage({
   const selectedStatus = validStatuses.includes(status) ? status : "";
 
   const orders = await prisma.order.findMany({
-    where: {
-      ...(selectedStatus
-        ? {
-            status: selectedStatus as OrderStatus,
-          }
-        : {}),
+  where: {
+    isDeleted: false,
 
-      ...(fromDate || toDate
-        ? {
-            createdAt: {
-              ...(fromDate ? { gte: fromDate } : {}),
-              ...(toDate ? { lte: toDate } : {}),
-            },
-          }
-        : {}),
+    ...(selectedStatus
+      ? {
+          status: selectedStatus as OrderStatus,
+        }
+      : {}),
 
-      ...(q
-        ? {
-            customer: {
-              OR: [
-                { fullName: { contains: q, mode: "insensitive" } },
-                { firstName: { contains: q, mode: "insensitive" } },
-                { lastName: { contains: q, mode: "insensitive" } },
-              ],
-            },
-          }
-        : {}),
-    },
-    include: { customer: true },
-    orderBy: { createdAt: "desc" },
-  });
+    ...(fromDate || toDate
+      ? {
+          createdAt: {
+            ...(fromDate ? { gte: fromDate } : {}),
+            ...(toDate ? { lte: toDate } : {}),
+          },
+        }
+      : {}),
+
+    ...(q
+      ? {
+          customer: {
+            OR: [
+              { fullName: { contains: q, mode: "insensitive" } },
+              { firstName: { contains: q, mode: "insensitive" } },
+              { lastName: { contains: q, mode: "insensitive" } },
+            ],
+          },
+        }
+      : {}),
+  },
+  include: { customer: true },
+  orderBy: { createdAt: "desc" },
+});
 
   return (
     <main className="space-y-6">

@@ -29,6 +29,8 @@ function serviceTypeLabel(serviceType: ServiceType) {
       return "Ρούχα";
     case "CARPETS":
       return "Χαλιά";
+    case "LINEN":
+      return "Ιματισμός";
     default:
       return serviceType;
   }
@@ -162,8 +164,11 @@ export default async function OrderPage({
     notFound();
   }
 
-  const order = await prisma.order.findUnique({
-    where: { id: orderId },
+  const order = await prisma.order.findFirst({
+  where: {
+    id: orderId,
+    isDeleted: false,
+  },
     include: {
       customer: true,
       payments: {
@@ -512,6 +517,40 @@ export default async function OrderPage({
     revalidatePath(customerPagePath);
   }
 
+  async function deleteOrder() {
+  "use server";
+
+  const currentOrder = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: {
+      id: true,
+      status: true,
+      isDeleted: true,
+    },
+  });
+
+  if (!currentOrder || currentOrder.isDeleted) {
+    notFound();
+  }
+
+  if (currentOrder.status === "PAID" || currentOrder.status === "DELIVERED") {
+    return;
+  }
+
+  await prisma.order.update({
+    where: { id: orderId },
+    data: {
+      isDeleted: true,
+    },
+  });
+
+  revalidatePath("/orders");
+  revalidatePath("/");
+  revalidatePath(customerPagePath);
+
+  redirect("/orders");
+}
+
   const remainingAmount =
     order.totalPrice != null
       ? order.totalPrice - (order.paidAmount ?? 0)
@@ -534,6 +573,16 @@ export default async function OrderPage({
             <a href={`/orders/${order.id}/edit`} className={getButtonClass()}>
               Επεξεργασία παραγγελίας
             </a>
+            {order.status !== "PAID" && order.status !== "DELIVERED" ? (
+  <form action={deleteOrder}>
+    <button
+      type="submit"
+      className="rounded-xl border border-red-600 bg-white px-4 py-3 text-red-600 transition duration-150 hover:bg-red-50 active:scale-[0.98] active:bg-red-600 active:text-white"
+    >
+      Διαγραφή παραγγελίας
+    </button>
+  </form>
+) : null}
 
             <a href={customerPagePath} className={getButtonClass()}>
               Επιστροφή στον πελάτη
