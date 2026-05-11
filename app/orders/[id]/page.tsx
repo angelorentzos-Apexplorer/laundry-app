@@ -630,10 +630,6 @@ export default async function OrderPage({
           <span className="font-medium">Τεμάχια:</span> {order.quantity ?? "-"}
         </div>
 
-        <div>
-          <span className="font-medium">Τετραγωνικά:</span>{" "}
-          {order.squareMeters ?? "-"}
-        </div>
 
         <div>
           <span className="font-medium">Ημερομηνία παραλαβής:</span>{" "}
@@ -750,14 +746,20 @@ export default async function OrderPage({
         <form action={addPayment} className="grid gap-4 md:grid-cols-2">
           <div>
             <label className="mb-1 block text-sm font-medium">Ποσό πληρωμής</label>
-            <input
-              name="amount"
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder="π.χ. 20"
-              className="w-full rounded-xl border px-4 py-3"
-            />
+            <div className="relative">
+  <input
+    name="amount"
+    type="number"
+    min="0"
+    step="0.01"
+    placeholder="π.χ. 20"
+    className="w-full rounded-xl border px-4 py-3 pr-10"
+  />
+
+  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
+    €
+  </span>
+</div>
           </div>
 
           <div>
@@ -800,26 +802,38 @@ export default async function OrderPage({
         <form action={updateFinancials} className="grid gap-4 md:grid-cols-2">
           <div>
             <label className="mb-1 block text-sm font-medium">Συνολικό ποσό</label>
-            <input
-              name="totalPrice"
-              type="number"
-              min="0"
-              step="0.01"
-              defaultValue={order.totalPrice ?? ""}
-              className="w-full rounded-xl border px-4 py-3"
-            />
+            <div className="relative">
+  <input
+    name="totalPrice"
+    type="number"
+    min="0"
+    step="0.01"
+    defaultValue={order.totalPrice ?? ""}
+    className="w-full rounded-xl border px-4 py-3 pr-10"
+  />
+
+  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
+    €
+  </span>
+</div>
           </div>
 
           <div>
             <label className="mb-1 block text-sm font-medium">Πληρωμένο ποσό</label>
-            <input
-              name="paidAmount"
-              type="number"
-              min="0"
-              step="0.01"
-              defaultValue={order.paidAmount ?? ""}
-              className="w-full rounded-xl border px-4 py-3"
-            />
+           <div className="relative">
+  <input
+    name="paidAmount"
+    type="number"
+    min="0"
+    step="0.01"
+    defaultValue={order.paidAmount ?? ""}
+    className="w-full rounded-xl border px-4 py-3 pr-10"
+  />
+
+  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
+    €
+  </span>
+</div>
           </div>
 
           <div className="md:col-span-2">
@@ -910,28 +924,35 @@ export default async function OrderPage({
           </div>
         </div>
 
-        <form action={markDeliveredAndPaid} className="space-y-4">
-          <div>
-            <label className="mb-1 block text-sm font-medium">
-              Τελική τιμή παραγγελίας
-            </label>
-            <input
-              name="totalPrice"
-              type="number"
-              min="0"
-              step="0.01"
-              defaultValue={order.totalPrice ?? ""}
-              className="w-full rounded-xl border px-4 py-3"
-            />
-          </div>
+       <form action={markDeliveredAndPaid} className="space-y-4">
+  <div>
+    <label className="mb-1 block text-sm font-medium">
+      Τελική τιμή παραγγελίας (€)
+    </label>
 
-          <div className="flex flex-wrap gap-3">
-            <button type="submit" className={getButtonClass()}>
-              Παράδοση και εξόφληση
-            </button>
-          </div>
-        </form>
-      </section>
-    </main>
-  );
+    <div className="relative">
+      <input
+        name="totalPrice"
+        type="number"
+        min="0"
+        step="0.01"
+        defaultValue={order.totalPrice ?? ""}
+        className="w-full rounded-xl border px-4 py-3 pr-10"
+      />
+
+      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
+        €
+      </span>
+    </div>
+  </div>
+
+  <div className="flex flex-wrap gap-3">
+    <button type="submit" className={getButtonClass()}>
+      Παράδοση και εξόφληση
+    </button> 
+    </div> 
+       </form> 
+    </section> 
+  </main>
+ );
 }

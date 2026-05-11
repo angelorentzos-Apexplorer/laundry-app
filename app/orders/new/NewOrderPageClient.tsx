@@ -587,8 +587,7 @@ export default function NewOrderPageClient() {
 
                 {serviceType === "LINEN" && row.productId !== "" ? (
                   <p className="mt-1 text-xs text-gray-500">
-                    Στον ιματισμό δίνεται ένας αριθμός ανά προϊόν, ανεξάρτητα από
-                    την ποσότητα.
+                    
                   </p>
                 ) : null}
               </div>
@@ -615,13 +614,19 @@ export default function NewOrderPageClient() {
                 <label className="mb-1 block text-sm font-medium">
                   Τιμή μονάδας
                 </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={row.unitPrice}
-                  readOnly
-                  className="w-full rounded-xl border bg-gray-50 px-4 py-3"
-                />
+                <div className="relative">
+  <input
+    type="number"
+    step="0.01"
+    value={row.unitPrice}
+    readOnly
+    className="w-full rounded-xl border bg-gray-50 px-4 py-3 pr-10"
+  />
+
+  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
+    €
+  </span>
+</div>
               </div>
 
               <div>
@@ -681,26 +686,38 @@ export default function NewOrderPageClient() {
             <label className="mb-1 block text-sm font-medium">
               Συνολικό ποσό
             </label>
-            <input
-              value={productsTotal > 0 ? productsTotal.toFixed(2) : ""}
-              readOnly
-              className="w-full rounded-xl border bg-gray-50 px-4 py-3"
-            />
+            <div className="relative">
+  <input
+    value={productsTotal > 0 ? productsTotal.toFixed(2) : ""}
+    readOnly
+    className="w-full rounded-xl border bg-gray-50 px-4 py-3 pr-10"
+  />
+
+  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
+    €
+  </span>
+</div>
           </div>
 
           <div>
             <label className="mb-1 block text-sm font-medium">
               Πληρωμένο ποσό
             </label>
-            <input
-              value={paidAmount}
-              onChange={(e) => setPaidAmount(e.target.value)}
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder="Προαιρετικό"
-              className="w-full rounded-xl border px-4 py-3"
-            />
+            <div className="relative">
+  <input
+    value={paidAmount}
+    onChange={(e) => setPaidAmount(e.target.value)}
+    type="number"
+    min="0"
+    step="0.01"
+    placeholder="Προαιρετικό"
+    className="w-full rounded-xl border px-4 py-3 pr-10"
+  />
+
+  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
+    €
+  </span>
+</div>
           </div>
         </div>
 
