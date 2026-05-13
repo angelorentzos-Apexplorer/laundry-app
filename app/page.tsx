@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-
+import HiddenMoneyBox from "./HiddenMoneyBox";
 export const dynamic = "force-dynamic";
 
 function getButtonClass() {
@@ -422,7 +422,7 @@ export default async function HomePage({
 <div>
         <h1 className="text-3xl font-bold">Dashboard</h1>
         <p className="mt-2 text-gray-600">
-          Εφαρμογή παραγγελιοληψίας για καθαριστήριο ρούχων και χαλιών.
+        
         </p>
       </div>
       
@@ -465,19 +465,15 @@ export default async function HomePage({
             <p className="mt-2 text-3xl font-bold">{ordersWeekCount}</p>
           </div>
 
-          <div className="rounded-2xl border bg-gray-50 p-5">
-            <p className="text-sm text-gray-500">Εισπράξεις σήμερα</p>
-            <p className="mt-2 text-3xl font-bold">
-              {formatMoney(receiptsToday)}
-            </p>
-          </div>
+          <HiddenMoneyBox
+  title="Εισπράξεις σήμερα"
+  value={formatMoney(receiptsToday)}
+/>
 
-          <div className="rounded-2xl border bg-gray-50 p-5">
-            <p className="text-sm text-gray-500">Εισπράξεις μήνα</p>
-            <p className="mt-2 text-3xl font-bold">
-              {formatMoney(receiptsMonth)}
-            </p>
-          </div>
+<HiddenMoneyBox
+  title="Εισπράξεις μήνα"
+  value={formatMoney(receiptsMonth)}
+/>
         </div>
       </section>
 

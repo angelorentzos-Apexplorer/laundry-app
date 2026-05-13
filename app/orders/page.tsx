@@ -16,6 +16,7 @@ const statusLabels: Record<string, string> = {
 const serviceLabels: Record<string, string> = {
   CLOTHES: "Ρούχα",
   CARPETS: "Χαλιά",
+  LINEN: "Ιματισμός",
 };
 
 function getButtonClass() {
@@ -56,39 +57,39 @@ export default async function OrdersPage({
   const selectedStatus = validStatuses.includes(status) ? status : "";
 
   const orders = await prisma.order.findMany({
-  where: {
-    isDeleted: false,
+    where: {
+      isDeleted: false,
 
-    ...(selectedStatus
-      ? {
-          status: selectedStatus as OrderStatus,
-        }
-      : {}),
+      ...(selectedStatus
+        ? {
+            status: selectedStatus as OrderStatus,
+          }
+        : {}),
 
-    ...(fromDate || toDate
-      ? {
-          createdAt: {
-            ...(fromDate ? { gte: fromDate } : {}),
-            ...(toDate ? { lte: toDate } : {}),
-          },
-        }
-      : {}),
+      ...(fromDate || toDate
+        ? {
+            createdAt: {
+              ...(fromDate ? { gte: fromDate } : {}),
+              ...(toDate ? { lte: toDate } : {}),
+            },
+          }
+        : {}),
 
-    ...(q
-      ? {
-          customer: {
-            OR: [
-              { fullName: { contains: q, mode: "insensitive" } },
-              { firstName: { contains: q, mode: "insensitive" } },
-              { lastName: { contains: q, mode: "insensitive" } },
-            ],
-          },
-        }
-      : {}),
-  },
-  include: { customer: true },
-  orderBy: { createdAt: "desc" },
-});
+      ...(q
+        ? {
+            customer: {
+              OR: [
+                { fullName: { contains: q, mode: "insensitive" } },
+                { firstName: { contains: q, mode: "insensitive" } },
+                { lastName: { contains: q, mode: "insensitive" } },
+              ],
+            },
+          }
+        : {}),
+    },
+    include: { customer: true },
+    orderBy: { createdAt: "desc" },
+  });
 
   return (
     <main className="space-y-6">
@@ -210,7 +211,7 @@ export default async function OrdersPage({
                     : "-"}
                 </td>
 
-                <td className="p-4">{formatDate(order.createdAt)}</td>
+                <td className="p-4">{formatDate(order.pickupDate)}</td>
 
                 <td className="p-4">{formatDate(order.deliveryDate)}</td>
 
