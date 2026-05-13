@@ -17,6 +17,15 @@ function formatDate(value: Date | string | null | undefined) {
   return new Date(value).toLocaleDateString("el-GR");
 }
 
+function formatDateTime(value: Date | string | null | undefined) {
+  if (!value) return "-";
+
+  return new Date(value).toLocaleString("el-GR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
+}
+
 function formatDateForInput(value: Date | string | null | undefined) {
   if (!value) return "";
   const date = new Date(value);
@@ -166,14 +175,17 @@ export default async function OrderPage({
   }
 
   const order = await prisma.order.findFirst({
-  where: {
-    id: orderId,
-    isDeleted: false,
-  },
+    where: {
+      id: orderId,
+      isDeleted: false,
+    },
     include: {
       customer: true,
       payments: {
         orderBy: { paymentDate: "desc" },
+      },
+      statusHistory: {
+        orderBy: { createdAt: "desc" },
       },
       orderItems: {
         include: {
@@ -226,6 +238,7 @@ export default async function OrderPage({
           id: { not: orderItemId },
           storageChainNumber: normalizedStorageChainNumber,
           order: {
+            isDeleted: false,
             status: {
               in: ACTIVE_STORAGE_STATUSES,
             },
@@ -278,9 +291,13 @@ export default async function OrderPage({
         ? new Date(paymentDateRaw)
         : new Date();
 
-    const currentOrder = await prisma.order.findUnique({
-      where: { id: orderId },
+    const currentOrder = await prisma.order.findFirst({
+      where: {
+        id: orderId,
+        isDeleted: false,
+      },
       select: {
+        status: true,
         paidAmount: true,
         totalPrice: true,
       },
@@ -305,14 +322,13 @@ export default async function OrderPage({
     await prisma.$transaction([
       prisma.orderPayment.create({
         data: {
-          order: {
-            connect: { id: orderId },
-          },
+          orderId,
           amount,
           paymentDate,
-          notes: paymentNotesRaw || null,
+          notes: paymentNotesRaw || "Καταχώρηση πληρωμής",
         },
       }),
+
       prisma.order.update({
         where: { id: orderId },
         data: {
@@ -321,10 +337,25 @@ export default async function OrderPage({
           ...(nextPaymentStatus ? { paymentStatus: nextPaymentStatus } : {}),
         },
       }),
+
+      ...(nextStatus && currentOrder.status !== nextStatus
+        ? [
+            prisma.orderStatusHistory.create({
+              data: {
+                orderId,
+                status: nextStatus,
+                notes: "Η παραγγελία εξοφλήθηκε μέσω καταχώρησης πληρωμής.",
+              },
+            }),
+          ]
+        : []),
     ]);
 
     revalidatePath(`/orders/${orderId}`);
     revalidatePath(customerPagePath);
+    revalidatePath("/");
+    revalidatePath("/analytics");
+    revalidatePath("/orders");
 
     if (shouldReturnToCustomer) {
       redirect(customerPagePath);
@@ -356,33 +387,76 @@ export default async function OrderPage({
         ? new Date(deliveryDateRaw)
         : null;
 
+    const currentOrder = await prisma.order.findFirst({
+      where: {
+        id: orderId,
+        isDeleted: false,
+      },
+      select: {
+        status: true,
+        paidAmount: true,
+      },
+    });
+
+    if (!currentOrder) return;
+
+    const previousPaidAmount = currentOrder.paidAmount ?? 0;
+    const nextPaidAmount = paidAmount ?? 0;
+    const paymentDifference = nextPaidAmount - previousPaidAmount;
+
     let nextStatus: OrderStatus | undefined;
     let nextPaymentStatus: "PAID" | "UNPAID" | undefined;
 
-    if (
-      totalPrice != null &&
-      paidAmount != null &&
-      paidAmount >= totalPrice
-    ) {
+    if (totalPrice != null && paidAmount != null && paidAmount >= totalPrice) {
       nextStatus = "PAID";
       nextPaymentStatus = "PAID";
     } else if (paidAmount != null) {
       nextPaymentStatus = "UNPAID";
     }
 
-    await prisma.order.update({
-      where: { id: orderId },
-      data: {
-        totalPrice,
-        paidAmount,
-        deliveryDate,
-        ...(nextStatus ? { status: nextStatus } : {}),
-        ...(nextPaymentStatus ? { paymentStatus: nextPaymentStatus } : {}),
-      },
-    });
+    await prisma.$transaction([
+      ...(paymentDifference > 0
+        ? [
+            prisma.orderPayment.create({
+              data: {
+                orderId,
+                amount: paymentDifference,
+                paymentDate: new Date(),
+                notes: "Ενημέρωση πληρωμένου ποσού από οικονομικά στοιχεία.",
+              },
+            }),
+          ]
+        : []),
+
+      prisma.order.update({
+        where: { id: orderId },
+        data: {
+          totalPrice,
+          paidAmount,
+          deliveryDate,
+          ...(nextStatus ? { status: nextStatus } : {}),
+          ...(nextPaymentStatus ? { paymentStatus: nextPaymentStatus } : {}),
+        },
+      }),
+
+      ...(nextStatus && currentOrder.status !== nextStatus
+        ? [
+            prisma.orderStatusHistory.create({
+              data: {
+                orderId,
+                status: nextStatus,
+                notes: "Η παραγγελία χαρακτηρίστηκε εξοφλημένη από οικονομικά στοιχεία.",
+              },
+            }),
+          ]
+        : []),
+    ]);
 
     revalidatePath(`/orders/${orderId}`);
     revalidatePath(customerPagePath);
+    revalidatePath("/");
+    revalidatePath("/analytics");
+    revalidatePath("/orders");
 
     if (shouldReturnToCustomer) {
       redirect(customerPagePath);
@@ -406,8 +480,13 @@ export default async function OrderPage({
       return;
     }
 
-    const currentOrder = await prisma.order.findUnique({
-      where: { id: orderId },
+    const nextStatus = statusRaw as OrderStatus;
+
+    const currentOrder = await prisma.order.findFirst({
+      where: {
+        id: orderId,
+        isDeleted: false,
+      },
       select: {
         status: true,
         deliveryDate: true,
@@ -421,8 +500,9 @@ export default async function OrderPage({
     });
 
     if (!currentOrder) return;
+    if (currentOrder.status === nextStatus) return;
 
-    if (statusRaw === "DELIVERED") {
+    if (nextStatus === "DELIVERED") {
       await prisma.$transaction([
         prisma.order.update({
           where: { id: orderId },
@@ -431,6 +511,7 @@ export default async function OrderPage({
             deliveryStatus: "DELIVERED",
           },
         }),
+
         prisma.orderItem.updateMany({
           where: {
             orderId,
@@ -442,27 +523,41 @@ export default async function OrderPage({
             storageChainNumber: null,
           },
         }),
+
+        prisma.orderStatusHistory.create({
+          data: {
+            orderId,
+            status: "DELIVERED",
+            notes: "Η παραγγελία παραδόθηκε.",
+          },
+        }),
       ]);
     } else {
-      await prisma.order.update({
-        where: { id: orderId },
-        data: {
-          status: statusRaw as OrderStatus,
-          ...(statusRaw === "NEW" ||
-          statusRaw === "PROCESSING" ||
-          statusRaw === "READY"
-            ? { deliveryStatus: "PENDING" as const }
-            : {}),
-          ...(statusRaw === "PAID" ? { paymentStatus: "PAID" as const } : {}),
-        },
-      });
+      await prisma.$transaction([
+        prisma.order.update({
+          where: { id: orderId },
+          data: {
+            status: nextStatus,
+            ...(nextStatus === "NEW" ||
+            nextStatus === "PROCESSING" ||
+            nextStatus === "READY"
+              ? { deliveryStatus: "PENDING" as const }
+              : {}),
+            ...(nextStatus === "PAID" ? { paymentStatus: "PAID" as const } : {}),
+          },
+        }),
+
+        prisma.orderStatusHistory.create({
+          data: {
+            orderId,
+            status: nextStatus,
+            notes: "Αλλαγή κατάστασης παραγγελίας.",
+          },
+        }),
+      ]);
     }
 
-    if (
-      statusRaw === "READY" &&
-      currentOrder.status !== "READY" &&
-      sendReadySms
-    ) {
+    if (nextStatus === "READY" && sendReadySms) {
       try {
         const notifyResult = await sendReadyNotification({
           customerName: currentOrder.customer.fullName,
@@ -479,6 +574,7 @@ export default async function OrderPage({
 
     revalidatePath(`/orders/${orderId}`);
     revalidatePath(customerPagePath);
+    revalidatePath("/orders");
   }
 
   async function markDeliveredAndPaid(formData: FormData) {
@@ -490,7 +586,36 @@ export default async function OrderPage({
     const totalPrice = Number(totalPriceRaw);
     if (totalPrice < 0) return;
 
+    const currentOrder = await prisma.order.findFirst({
+      where: {
+        id: orderId,
+        isDeleted: false,
+      },
+      select: {
+        status: true,
+        paidAmount: true,
+      },
+    });
+
+    if (!currentOrder) return;
+
+    const currentPaidAmount = currentOrder.paidAmount ?? 0;
+    const remainingToPay = Math.max(0, totalPrice - currentPaidAmount);
+
     await prisma.$transaction([
+      ...(remainingToPay > 0
+        ? [
+            prisma.orderPayment.create({
+              data: {
+                orderId,
+                amount: remainingToPay,
+                paymentDate: new Date(),
+                notes: "Εξόφληση κατά την παράδοση.",
+              },
+            }),
+          ]
+        : []),
+
       prisma.order.update({
         where: { id: orderId },
         data: {
@@ -501,6 +626,7 @@ export default async function OrderPage({
           status: "PAID",
         },
       }),
+
       prisma.orderItem.updateMany({
         where: {
           orderId,
@@ -512,45 +638,60 @@ export default async function OrderPage({
           storageChainNumber: null,
         },
       }),
+
+      ...(currentOrder.status !== "PAID"
+        ? [
+            prisma.orderStatusHistory.create({
+              data: {
+                orderId,
+                status: "PAID",
+                notes: "Παράδοση και εξόφληση παραγγελίας.",
+              },
+            }),
+          ]
+        : []),
     ]);
 
     revalidatePath(`/orders/${orderId}`);
     revalidatePath(customerPagePath);
+    revalidatePath("/");
+    revalidatePath("/analytics");
+    revalidatePath("/orders");
   }
 
   async function deleteOrder() {
-  "use server";
+    "use server";
 
-  const currentOrder = await prisma.order.findUnique({
-    where: { id: orderId },
-    select: {
-      id: true,
-      status: true,
-      isDeleted: true,
-    },
-  });
+    const currentOrder = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        status: true,
+        isDeleted: true,
+      },
+    });
 
-  if (!currentOrder || currentOrder.isDeleted) {
-    notFound();
+    if (!currentOrder || currentOrder.isDeleted) {
+      notFound();
+    }
+
+    if (currentOrder.status === "PAID" || currentOrder.status === "DELIVERED") {
+      return;
+    }
+
+    await prisma.order.update({
+      where: { id: orderId },
+      data: {
+        isDeleted: true,
+      },
+    });
+
+    revalidatePath("/orders");
+    revalidatePath("/");
+    revalidatePath(customerPagePath);
+
+    redirect("/orders");
   }
-
-  if (currentOrder.status === "PAID" || currentOrder.status === "DELIVERED") {
-    return;
-  }
-
-  await prisma.order.update({
-    where: { id: orderId },
-    data: {
-      isDeleted: true,
-    },
-  });
-
-  revalidatePath("/orders");
-  revalidatePath("/");
-  revalidatePath(customerPagePath);
-
-  redirect("/orders");
-}
 
   const remainingAmount =
     order.totalPrice != null
@@ -574,11 +715,12 @@ export default async function OrderPage({
             <a href={`/orders/${order.id}/edit`} className={getButtonClass()}>
               Επεξεργασία παραγγελίας
             </a>
+
             {order.status !== "PAID" && order.status !== "DELIVERED" ? (
-  <form action={deleteOrder}>
-    <DeleteOrderButton />
-  </form>
-) : null}
+              <form action={deleteOrder}>
+                <DeleteOrderButton />
+              </form>
+            ) : null}
 
             <a href={customerPagePath} className={getButtonClass()}>
               Επιστροφή στον πελάτη
@@ -625,7 +767,6 @@ export default async function OrderPage({
         <div>
           <span className="font-medium">Τεμάχια:</span> {order.quantity ?? "-"}
         </div>
-
 
         <div>
           <span className="font-medium">Ημερομηνία παραλαβής:</span>{" "}
@@ -688,7 +829,7 @@ export default async function OrderPage({
                 <div className="space-y-3">
                   <div className="text-sm font-medium">Μοναδικοί αριθμοί / αλυσίδες</div>
 
-                  {group.serials.map((serialItem, serialIndex) => (
+                  {group.serials.map((serialItem) => (
                     <div
                       key={serialItem.id}
                       className="grid gap-3 rounded-xl border bg-white p-3 md:grid-cols-[140px_1fr]"
@@ -743,19 +884,19 @@ export default async function OrderPage({
           <div>
             <label className="mb-1 block text-sm font-medium">Ποσό πληρωμής</label>
             <div className="relative">
-  <input
-    name="amount"
-    type="number"
-    min="0"
-    step="0.01"
-    placeholder="π.χ. 20"
-    className="w-full rounded-xl border px-4 py-3 pr-10"
-  />
+              <input
+                name="amount"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="π.χ. 20"
+                className="w-full rounded-xl border px-4 py-3 pr-10"
+              />
 
-  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
-    €
-  </span>
-</div>
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
+                €
+              </span>
+            </div>
           </div>
 
           <div>
@@ -799,37 +940,37 @@ export default async function OrderPage({
           <div>
             <label className="mb-1 block text-sm font-medium">Συνολικό ποσό</label>
             <div className="relative">
-  <input
-    name="totalPrice"
-    type="number"
-    min="0"
-    step="0.01"
-    defaultValue={order.totalPrice ?? ""}
-    className="w-full rounded-xl border px-4 py-3 pr-10"
-  />
+              <input
+                name="totalPrice"
+                type="number"
+                min="0"
+                step="0.01"
+                defaultValue={order.totalPrice ?? ""}
+                className="w-full rounded-xl border px-4 py-3 pr-10"
+              />
 
-  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
-    €
-  </span>
-</div>
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
+                €
+              </span>
+            </div>
           </div>
 
           <div>
             <label className="mb-1 block text-sm font-medium">Πληρωμένο ποσό</label>
-           <div className="relative">
-  <input
-    name="paidAmount"
-    type="number"
-    min="0"
-    step="0.01"
-    defaultValue={order.paidAmount ?? ""}
-    className="w-full rounded-xl border px-4 py-3 pr-10"
-  />
+            <div className="relative">
+              <input
+                name="paidAmount"
+                type="number"
+                min="0"
+                step="0.01"
+                defaultValue={order.paidAmount ?? ""}
+                className="w-full rounded-xl border px-4 py-3 pr-10"
+              />
 
-  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
-    €
-  </span>
-</div>
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
+                €
+              </span>
+            </div>
           </div>
 
           <div className="md:col-span-2">
@@ -902,6 +1043,39 @@ export default async function OrderPage({
       </section>
 
       <section className="space-y-4 rounded-2xl border bg-white p-6">
+        <h2 className="text-lg font-bold">Ιστορικό κατάστασης</h2>
+
+        {order.statusHistory.length === 0 ? (
+          <p className="text-gray-500">
+            Δεν υπάρχει ακόμη ιστορικό αλλαγών κατάστασης.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {order.statusHistory.map((entry) => (
+              <div
+                key={entry.id}
+                className="rounded-xl border bg-gray-50 p-4"
+              >
+                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div className="font-medium">
+                    {statusLabel(entry.status)}
+                  </div>
+
+                  <div className="text-sm text-gray-600">
+                    {formatDateTime(entry.createdAt)}
+                  </div>
+                </div>
+
+                <div className="mt-2 text-sm text-gray-700">
+                  {entry.notes || "-"}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="space-y-4 rounded-2xl border bg-white p-6">
         <h2 className="text-lg font-bold">Παράδοση και εξόφληση</h2>
 
         <div className="grid gap-4 md:grid-cols-2">
@@ -920,35 +1094,35 @@ export default async function OrderPage({
           </div>
         </div>
 
-       <form action={markDeliveredAndPaid} className="space-y-4">
-  <div>
-    <label className="mb-1 block text-sm font-medium">
-      Τελική τιμή παραγγελίας (€)
-    </label>
+        <form action={markDeliveredAndPaid} className="space-y-4">
+          <div>
+            <label className="mb-1 block text-sm font-medium">
+              Τελική τιμή παραγγελίας (€)
+            </label>
 
-    <div className="relative">
-      <input
-        name="totalPrice"
-        type="number"
-        min="0"
-        step="0.01"
-        defaultValue={order.totalPrice ?? ""}
-        className="w-full rounded-xl border px-4 py-3 pr-10"
-      />
+            <div className="relative">
+              <input
+                name="totalPrice"
+                type="number"
+                min="0"
+                step="0.01"
+                defaultValue={order.totalPrice ?? ""}
+                className="w-full rounded-xl border px-4 py-3 pr-10"
+              />
 
-      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
-        €
-      </span>
-    </div>
-  </div>
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
+                €
+              </span>
+            </div>
+          </div>
 
-  <div className="flex flex-wrap gap-3">
-    <button type="submit" className={getButtonClass()}>
-      Παράδοση και εξόφληση
-    </button> 
-    </div> 
-       </form> 
-    </section> 
-  </main>
- );
+          <div className="flex flex-wrap gap-3">
+            <button type="submit" className={getButtonClass()}>
+              Παράδοση και εξόφληση
+            </button>
+          </div>
+        </form>
+      </section>
+    </main>
+  );
 }

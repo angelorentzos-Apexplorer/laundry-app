@@ -44,6 +44,7 @@ model Order {
   customer   Customer       @relation(fields: [customerId], references: [id])
   payments   OrderPayment[]
   orderItems OrderItem[]
+  statusHistory OrderStatusHistory[]
 }
 
 model OrderPayment {
@@ -123,4 +124,18 @@ model AppSequence {
   key       String   @id
   value     Int
   updatedAt DateTime @updatedAt
+}
+
+model OrderStatusHistory {
+  id        Int         @id @default(autoincrement())
+  orderId   Int
+  status    OrderStatus
+  createdAt DateTime    @default(now())
+  notes     String?
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([status])
+  @@index([createdAt])
 }
