@@ -578,7 +578,7 @@ export default function NewOrderPageClient() {
           </div>
 
           {rows.map((row, index) => {
-            const suggestions = getProductSuggestions(row);
+          
 
             return (
               <div
@@ -586,52 +586,45 @@ export default function NewOrderPageClient() {
                 className="grid gap-3 rounded-xl border p-3 md:grid-cols-[1.6fr_180px_110px_140px_120px]"
               >
                 <div className="relative">
-                  <label className="mb-1 block text-sm font-medium">Προϊόν</label>
+  <label className="mb-1 block text-sm font-medium">Προϊόν</label>
 
-                  <input
-                    value={row.productSearch}
-                    onChange={(e) => handleProductSearchChange(index, e.target.value)}
-                    onFocus={() => {
-                      if (row.productSearch.trim().length >= 2) {
-                        updateRow(index, { productSuggestionsOpen: true });
-                      }
-                    }}
-                    placeholder="Αναζήτηση προϊόντος π.χ. πα..."
-                    className="mb-2 w-full rounded-xl border px-4 py-3 outline-none transition focus:border-black"
-                  />
+  <input
+    value={row.productSearch}
+    onChange={(e) => handleProductSearchChange(index, e.target.value)}
+    onFocus={() => {
+      updateRow(index, { productSuggestionsOpen: true });
+    }}
+    placeholder="Πληκτρολόγησε προϊόν π.χ. πα..."
+    className="w-full rounded-xl border px-4 py-3 outline-none transition focus:border-black"
+  />
 
-                  {row.productSuggestionsOpen && suggestions.length > 0 && (
-                    <div className="absolute z-20 max-h-64 w-full overflow-auto rounded-xl border bg-white shadow-lg">
-                      {suggestions.map((product) => (
-                        <button
-                          key={product.id}
-                          type="button"
-                          onClick={() => handleProductSelect(index, product)}
-                          className="block w-full border-b px-4 py-3 text-left text-sm hover:bg-gray-100"
-                        >
-                          <div className="font-medium">{product.name}</div>
-                          <div className="text-xs text-gray-500">
-                            {product.unitPrice.toFixed(2)} €
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
+  {row.productSuggestionsOpen && (
+    <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-xl border bg-white shadow-lg">
+      {filteredProducts
+        .filter((product) => {
+          const q = row.productSearch.trim().toLowerCase();
 
-                  <select
-                    value={row.productId}
-                    onChange={(e) => handleProductChange(index, e.target.value)}
-                    className="w-full rounded-xl border px-4 py-3"
-                  >
-                    <option value="">Ή επιλογή από λίστα</option>
-                    {filteredProducts.map((product) => (
-                      <option key={product.id} value={product.id}>
-                        {product.name} ({product.unitPrice.toFixed(2)} €)
-                      </option>
-                    ))}
-                  </select>
-                </div>
+          if (!q) return true;
 
+          return product.name.toLowerCase().includes(q);
+        })
+        .slice(0, 8)
+        .map((product) => (
+          <button
+            key={product.id}
+            type="button"
+            onClick={() => handleProductSelect(index, product)}
+            className="block w-full border-b px-4 py-3 text-left text-sm hover:bg-gray-100"
+          >
+            <div className="font-medium">{product.name}</div>
+            <div className="text-xs text-gray-500">
+              {product.unitPrice.toFixed(2)} €
+            </div>
+          </button>
+        ))}
+    </div>
+  )}
+</div>
                 <div>
                   <label className="mb-1 block text-sm font-medium">
                     Μοναδικοί αριθμοί
