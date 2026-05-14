@@ -50,14 +50,54 @@ body {
 
   body {
     background: white !important;
+    color: black !important;
   }
 
   main {
     max-width: none !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
   }
 
   section {
     break-inside: avoid;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin-bottom: 14px !important;
+  }
+
+  img {
+    max-height: 50px !important;
+  }
+
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    font-size: 11px !important;
+  }
+
+  th,
+  td {
+    border: 1px solid #000 !important;
+    padding: 6px !important;
+    color: #000 !important;
+  }
+
+  thead {
+    background: #eee !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  a {
+    color: black !important;
+    text-decoration: none !important;
+  }
+
+  .print\:no-underline {
+    text-decoration: none !important;
   }
 
   @page {

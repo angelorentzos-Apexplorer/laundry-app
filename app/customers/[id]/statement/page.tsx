@@ -228,14 +228,24 @@ export default async function CustomerStatementPage({
       <section className="rounded-2xl border bg-white p-6 print:border-0 print:p-0">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Καρτέλα κίνησης πελάτη</h1>
-            <p className="text-gray-600">
-              {customer.fullName} • {customer.phone || "-"}
-            </p>
-            <p className="text-sm text-gray-500">
-              Κωδικός πελάτη: #{customer.id}
-            </p>
-          </div>
+            <div className="flex items-start gap-4">
+  <img
+    src="/logo.png"
+    alt="Logo"
+    className="h-14 w-auto object-contain"
+  />
+
+  <div>
+    <h1 className="text-2xl font-bold">Καρτέλα κίνησης πελάτη</h1>
+    <p className="text-gray-600">
+      {customer.fullName} • {customer.phone || "-"}
+    </p>
+    <p className="text-sm text-gray-500">
+      Κωδικός πελάτη: #{customer.id}
+    </p>
+  </div>
+  </div>
+</div>
 
           <div className="no-print flex flex-wrap gap-3">
             <a href={`/customers/${customer.id}`} className={getButtonClass()}>
