@@ -188,7 +188,6 @@ export default async function OrdersPage({
               <th className="p-4">Σύνολο</th>
               <th className="p-4">Ημερ/νία Παραλαβής</th>
               <th className="p-4">Ημερ/νία Παράδοσης</th>
-              <th className="p-4">Νο Αποθήκευσης</th>
               <th className="p-4">Κατάσταση</th>
             </tr>
           </thead>
