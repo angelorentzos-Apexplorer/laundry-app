@@ -76,19 +76,13 @@ export default async function CustomerStatementPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{
-    from?: string;
-    to?: string;
-  }>;
+  searchParams?: Promise<{ from?: string; to?: string }>;
 }) {
   const resolvedParams = await params;
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
 
   const customerId = Number(resolvedParams.id);
-
-  if (!customerId || Number.isNaN(customerId)) {
-    notFound();
-  }
+  if (!customerId || Number.isNaN(customerId)) notFound();
 
   const from = String(resolvedSearchParams?.from || "").trim();
   const to = String(resolvedSearchParams?.to || "").trim();
@@ -100,26 +94,18 @@ export default async function CustomerStatementPage({
     where: { id: customerId },
     include: {
       orders: {
-        where: {
-          isDeleted: false,
-        },
+        where: { isDeleted: false },
         include: {
           payments: {
-            orderBy: {
-              paymentDate: "asc",
-            },
+            orderBy: { paymentDate: "asc" },
           },
         },
-        orderBy: {
-          createdAt: "asc",
-        },
+        orderBy: { createdAt: "asc" },
       },
     },
   });
 
-  if (!customer) {
-    notFound();
-  }
+  if (!customer) notFound();
 
   const finalOrders = customer.orders.filter(
     (order) => order.status !== ("DRAFT" as OrderStatus)
@@ -165,13 +151,12 @@ export default async function CustomerStatementPage({
         debit: 0,
         credit: 0,
       });
-
       continue;
     }
 
     rawMovements.push({
       date: order.pickupDate || order.createdAt,
-      type: "Παραλαβή παραγγελίας",
+      type: "Παραλαβή",
       orderId: order.id,
       description: `${serviceTypeLabel(order.serviceType)} • ${order.itemsDescription || "-"}`,
       debit: order.totalPrice ?? 0,
@@ -204,10 +189,8 @@ export default async function CustomerStatementPage({
   const filteredRawMovements = rawMovements
     .filter((movement) => {
       const time = movement.date.getTime();
-
       if (fromDate && time < fromDate.getTime()) return false;
       if (toDate && time > toDate.getTime()) return false;
-
       return true;
     })
     .sort((a, b) => a.date.getTime() - b.date.getTime());
@@ -216,42 +199,29 @@ export default async function CustomerStatementPage({
 
   const movements: Movement[] = filteredRawMovements.map((movement) => {
     runningBalance += movement.debit - movement.credit;
-
-    return {
-      ...movement,
-      balance: runningBalance,
-    };
+    return { ...movement, balance: runningBalance };
   });
 
+  const periodText =
+    from || to
+      ? `${from ? formatDate(from) : "Αρχή"} - ${to ? formatDate(to) : "Σήμερα"}`
+      : "Όλη η περίοδος";
+
   return (
-    <main className="space-y-6 print:space-y-4">
-      <section className="rounded-2xl border bg-white p-6 print:border-0 print:p-0">
+    <main className="statement-page space-y-6">
+      <section className="no-print rounded-2xl border bg-white p-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
-            <div className="flex items-start gap-4">
-  <img
-    src="/logo.png"
-    alt="Logo"
-    className="h-14 w-auto object-contain"
-  />
+            <h1 className="text-2xl font-bold">Καρτέλα κίνησης πελάτη</h1>
+            <p className="text-gray-600">
+              {customer.fullName} • {customer.phone || "-"}
+            </p>
+          </div>
 
-  <div>
-    <h1 className="text-2xl font-bold">Καρτέλα κίνησης πελάτη</h1>
-    <p className="text-gray-600">
-      {customer.fullName} • {customer.phone || "-"}
-    </p>
-    <p className="text-sm text-gray-500">
-      Κωδικός πελάτη: #{customer.id}
-    </p>
-  </div>
-  </div>
-</div>
-
-          <div className="no-print flex flex-wrap gap-3">
+          <div className="flex flex-wrap gap-3">
             <a href={`/customers/${customer.id}`} className={getButtonClass()}>
               Επιστροφή στον πελάτη
             </a>
-
             <StatementPrintButton />
           </div>
         </div>
@@ -300,77 +270,94 @@ export default async function CustomerStatementPage({
         </form>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-5">
-        <div className="rounded-2xl border bg-white p-5">
-          <div className="text-sm text-gray-500">Σύνολο αξίας</div>
-          <div className="mt-2 text-2xl font-bold">
-            {formatMoney(totalOrdersAmount)}
+      <section className="statement-report rounded-2xl border bg-white p-8">
+        <div className="statement-header mb-6 flex items-start justify-between border-b pb-4">
+          <div className="flex items-start gap-4">
+            <img
+              src="/logo.png"
+              alt="Logo"
+              className="statement-logo h-16 w-auto object-contain"
+            />
+
+            <div>
+              <h1 className="text-xl font-bold">ΚΑΡΤΕΛΑ ΚΙΝΗΣΗΣ ΠΕΛΑΤΗ</h1>
+              <p className="mt-1 text-sm text-gray-600">
+                Περίοδος: {periodText}
+              </p>
+              <p className="text-sm text-gray-600">
+                Ημερομηνία έκδοσης: {formatDate(new Date())}
+              </p>
+            </div>
+          </div>
+
+          <div className="statement-business text-right text-sm">
+            <div className="font-bold">Laundry Admin</div>
+            <div>Καθαριστήριο</div>
+            <div>Τηλ.: -</div>
+            <div>ΑΦΜ: -</div>
           </div>
         </div>
 
-        <div className="rounded-2xl border bg-white p-5">
-          <div className="text-sm text-gray-500">Σύνολο πληρωμών</div>
-          <div className="mt-2 text-2xl font-bold">
-            {formatMoney(totalPaidAmount)}
+        <div className="mb-6 grid gap-4 md:grid-cols-2">
+          <div className="rounded-xl border bg-gray-50 p-4">
+            <h2 className="mb-2 font-bold">Στοιχεία πελάτη</h2>
+            <div className="text-sm">Κωδικός: #{customer.id}</div>
+            <div className="text-sm">Ονοματεπώνυμο: {customer.fullName || "-"}</div>
+            <div className="text-sm">Τηλέφωνο: {customer.phone || "-"}</div>
+            <div className="text-sm">Διεύθυνση: {customer.address || "-"}</div>
+          </div>
+
+          <div className="rounded-xl border bg-gray-50 p-4">
+            <h2 className="mb-2 font-bold">Σύνοψη</h2>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div>Σύνολο αξίας:</div>
+              <div className="text-right font-medium">{formatMoney(totalOrdersAmount)}</div>
+
+              <div>Σύνολο πληρωμών:</div>
+              <div className="text-right font-medium">{formatMoney(totalPaidAmount)}</div>
+
+              <div>Ανοιχτό υπόλοιπο:</div>
+              <div className="text-right font-bold">{formatMoney(totalRemainingAmount)}</div>
+
+              <div>Ανοιχτές παραγγελίες:</div>
+              <div className="text-right font-medium">{openOrders.length}</div>
+
+              <div>Παραδομένες:</div>
+              <div className="text-right font-medium">{deliveredOrders.length}</div>
+            </div>
           </div>
         </div>
 
-        <div className="rounded-2xl border bg-white p-5">
-          <div className="text-sm text-gray-500">Ανοιχτό υπόλοιπο</div>
-          <div className="mt-2 text-2xl font-bold">
-            {formatMoney(totalRemainingAmount)}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border bg-white p-5">
-          <div className="text-sm text-gray-500">Ανοιχτές παραγγελίες</div>
-          <div className="mt-2 text-2xl font-bold">{openOrders.length}</div>
-        </div>
-
-        <div className="rounded-2xl border bg-white p-5">
-          <div className="text-sm text-gray-500">Παραδομένες</div>
-          <div className="mt-2 text-2xl font-bold">{deliveredOrders.length}</div>
-        </div>
-      </section>
-
-      <section className="rounded-2xl border bg-white p-6">
-        <h2 className="mb-4 text-lg font-bold">Αναλυτικές κινήσεις</h2>
+        <h2 className="mb-3 text-lg font-bold">Αναλυτικές κινήσεις</h2>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px] text-sm">
-            <thead className="bg-gray-100 text-left">
+          <table className="statement-table w-full min-w-[900px] text-sm">
+            <thead>
               <tr>
-                <th className="p-3">Ημερομηνία</th>
-                <th className="p-3">Κίνηση</th>
-                <th className="p-3">Παραγγελία</th>
-                <th className="p-3">Περιγραφή</th>
-                <th className="p-3 text-right">Χρέωση</th>
-                <th className="p-3 text-right">Πίστωση</th>
-                <th className="p-3 text-right">Υπόλοιπο</th>
+                <th>Ημερομηνία</th>
+                <th>Κίνηση</th>
+                <th>Παραγγελία</th>
+                <th>Περιγραφή</th>
+                <th className="text-right">Χρέωση</th>
+                <th className="text-right">Πίστωση</th>
+                <th className="text-right">Υπόλοιπο</th>
               </tr>
             </thead>
 
             <tbody>
               {movements.map((movement, index) => (
-                <tr key={`${movement.orderId}-${movement.type}-${index}`} className="border-t">
-                  <td className="p-3">{formatDate(movement.date)}</td>
-                  <td className="p-3">{movement.type}</td>
-                  <td className="p-3">
-                    <a
-                      href={`/orders/${movement.orderId}`}
-                      className="underline print:no-underline"
-                    >
-                      #{movement.orderId}
-                    </a>
-                  </td>
-                  <td className="p-3">{movement.description}</td>
-                  <td className="p-3 text-right">
+                <tr key={`${movement.orderId}-${movement.type}-${index}`}>
+                  <td>{formatDate(movement.date)}</td>
+                  <td>{movement.type}</td>
+                  <td>#{movement.orderId}</td>
+                  <td>{movement.description}</td>
+                  <td className="text-right">
                     {movement.debit > 0 ? formatMoney(movement.debit) : "-"}
                   </td>
-                  <td className="p-3 text-right">
+                  <td className="text-right">
                     {movement.credit > 0 ? formatMoney(movement.credit) : "-"}
                   </td>
-                  <td className="p-3 text-right font-medium">
+                  <td className="text-right font-medium">
                     {formatMoney(movement.balance)}
                   </td>
                 </tr>
@@ -384,50 +371,39 @@ export default async function CustomerStatementPage({
                 </tr>
               )}
             </tbody>
+
+            <tfoot>
+              <tr>
+                <td colSpan={4} className="text-right font-bold">
+                  Σύνολα
+                </td>
+                <td className="text-right font-bold">
+                  {formatMoney(
+                    movements.reduce((sum, movement) => sum + movement.debit, 0)
+                  )}
+                </td>
+                <td className="text-right font-bold">
+                  {formatMoney(
+                    movements.reduce((sum, movement) => sum + movement.credit, 0)
+                  )}
+                </td>
+                <td className="text-right font-bold">
+                  {formatMoney(runningBalance)}
+                </td>
+              </tr>
+            </tfoot>
           </table>
         </div>
-      </section>
 
-      <section className="rounded-2xl border bg-white p-6">
-        <h2 className="mb-4 text-lg font-bold">Ανοιχτές παραγγελίες</h2>
-
-        {openOrders.length === 0 ? (
-          <p className="text-gray-500">Δεν υπάρχουν ανοιχτές παραγγελίες.</p>
-        ) : (
-          <div className="space-y-3">
-            {openOrders.map((order) => {
-              const remaining = (order.totalPrice ?? 0) - (order.paidAmount ?? 0);
-
-              return (
-                <a
-                  key={order.id}
-                  href={`/orders/${order.id}`}
-                  className="block rounded-xl border bg-gray-50 p-4 transition hover:bg-gray-100 print:border print:bg-white"
-                >
-                  <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                    <div>
-                      <div className="font-bold">Παραγγελία #{order.id}</div>
-                      <div className="text-sm text-gray-600">
-                        {serviceTypeLabel(order.serviceType)} • {statusLabel(order.status)}
-                      </div>
-                      <div className="text-sm text-gray-600">
-                        Παράδοση: {formatDate(order.deliveryDate)}
-                      </div>
-                    </div>
-
-                    <div className="text-sm">
-                      <div>Σύνολο: {formatMoney(order.totalPrice)}</div>
-                      <div>Πληρωμένο: {formatMoney(order.paidAmount)}</div>
-                      <div className="font-medium">
-                        Υπόλοιπο: {formatMoney(remaining)}
-                      </div>
-                    </div>
-                  </div>
-                </a>
-              );
-            })}
+        <div className="mt-8 grid grid-cols-2 gap-10 text-sm">
+          <div className="pt-10 text-center">
+            <div className="border-t pt-2">Υπογραφή πελάτη</div>
           </div>
-        )}
+
+          <div className="pt-10 text-center">
+            <div className="border-t pt-2">Υπογραφή / Σφραγίδα καταστήματος</div>
+          </div>
+        </div>
       </section>
     </main>
   );

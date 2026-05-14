@@ -53,40 +53,60 @@ body {
     color: black !important;
   }
 
-  main {
-    max-width: none !important;
-    width: 100% !important;
+  .statement-page {
     margin: 0 !important;
     padding: 0 !important;
   }
 
-  section {
-    break-inside: avoid;
+  .statement-report {
     border: none !important;
     box-shadow: none !important;
+    border-radius: 0 !important;
     padding: 0 !important;
+  }
+
+  .statement-header {
+    display: flex !important;
+    align-items: flex-start !important;
+    justify-content: space-between !important;
+    border-bottom: 1px solid #000 !important;
+    padding-bottom: 10px !important;
     margin-bottom: 14px !important;
   }
 
-  img {
-    max-height: 50px !important;
+  .statement-logo {
+    max-height: 55px !important;
   }
 
-  table {
-    width: 100% !important;
-    border-collapse: collapse !important;
+  .statement-business {
     font-size: 11px !important;
+    line-height: 1.35 !important;
   }
 
-  th,
-  td {
+  .statement-table {
+    width: 100% !important;
+    min-width: 0 !important;
+    border-collapse: collapse !important;
+    font-size: 10.5px !important;
+  }
+
+  .statement-table th,
+  .statement-table td {
     border: 1px solid #000 !important;
-    padding: 6px !important;
+    padding: 5px !important;
     color: #000 !important;
+    vertical-align: top !important;
   }
 
-  thead {
+  .statement-table thead th {
     background: #eee !important;
+    font-weight: 700 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .statement-table tfoot td {
+    background: #f2f2f2 !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
@@ -96,8 +116,8 @@ body {
     text-decoration: none !important;
   }
 
-  .print\:no-underline {
-    text-decoration: none !important;
+  section {
+    break-inside: avoid;
   }
 
   @page {
