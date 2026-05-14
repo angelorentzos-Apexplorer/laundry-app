@@ -35,6 +35,8 @@ function statusLabel(status: OrderStatus) {
       return "Παραδόθηκε";
     case "PAID":
       return "Εξοφλημένη";
+    case "DRAFT":
+      return "Προσωρινή";
     default:
       return status;
   }
@@ -146,6 +148,13 @@ export default async function CustomerPage({
             >
               Νέα παραγγελία
             </a>
+
+            <a
+  href={`/customers/${customer.id}/statement`}
+  className={getButtonClass()}
+>
+  Καρτέλα κίνησης
+</a>
           </div>
         </div>
       </div>
