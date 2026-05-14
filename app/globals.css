@@ -44,7 +44,20 @@ body {
 }
 
 @media print {
-  .no-print {
+  .no-print,
+  header,
+  nav,
+  aside,
+  [role="navigation"],
+  .navbar,
+  .navibar,
+  .sidebar,
+  .app-header,
+  .main-header,
+  .dashboard-header,
+  .layout-header,
+  .menu,
+  .top-menu {
     display: none !important;
   }
 
