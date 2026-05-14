@@ -20,6 +20,8 @@ type Product = {
 
 type Row = {
   productId: number | "";
+  productSearch: string;
+  productSuggestionsOpen: boolean;
   quantity: number;
   unitPrice: number;
   lineTotal: number;
@@ -80,6 +82,8 @@ function getTodayForInput() {
 function getEmptyRow(): Row {
   return {
     productId: "",
+    productSearch: "",
+    productSuggestionsOpen: false,
     quantity: 1,
     unitPrice: 0,
     lineTotal: 0,
@@ -268,6 +272,8 @@ export default function NewOrderPageClient() {
     if (!rawProductId) {
       updateRow(index, {
         productId: "",
+        productSearch: "",
+        productSuggestionsOpen: false,
         unitPrice: 0,
         lineTotal: 0,
         itemSerialNumbers: [],
@@ -281,8 +287,40 @@ export default function NewOrderPageClient() {
 
     updateRow(index, {
       productId,
+      productSearch: product.name,
+      productSuggestionsOpen: false,
       unitPrice: product.unitPrice,
     });
+  }
+
+  function handleProductSearchChange(index: number, value: string) {
+    updateRow(index, {
+      productSearch: value,
+      productSuggestionsOpen: value.trim().length >= 2,
+      productId: "",
+      unitPrice: 0,
+      lineTotal: 0,
+      itemSerialNumbers: [],
+    });
+  }
+
+  function handleProductSelect(index: number, product: Product) {
+    updateRow(index, {
+      productId: product.id,
+      productSearch: product.name,
+      productSuggestionsOpen: false,
+      unitPrice: product.unitPrice,
+    });
+  }
+
+  function getProductSuggestions(row: Row) {
+    const q = row.productSearch.trim().toLowerCase();
+
+    if (q.length < 2) return [];
+
+    return filteredProducts
+      .filter((product) => product.name.toLowerCase().includes(q))
+      .slice(0, 8);
   }
 
   function addRow() {
@@ -539,114 +577,143 @@ export default function NewOrderPageClient() {
             </button>
           </div>
 
-          {rows.map((row, index) => (
-            <div
-              key={index}
-              className="grid gap-3 rounded-xl border p-3 md:grid-cols-[1.6fr_180px_110px_140px_120px]"
-            >
-              <div>
-                <label className="mb-1 block text-sm font-medium">Προϊόν</label>
-                <select
-                  value={row.productId}
-                  onChange={(e) => handleProductChange(index, e.target.value)}
-                  className="w-full rounded-xl border px-4 py-3"
-                >
-                  <option value="">Επιλογή προϊόντος</option>
-                  {filteredProducts.map((product) => (
-                    <option key={product.id} value={product.id}>
-                      {product.name} ({product.unitPrice.toFixed(2)} €)
-                    </option>
-                  ))}
-                </select>
-              </div>
+          {rows.map((row, index) => {
+            const suggestions = getProductSuggestions(row);
 
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Μοναδικοί αριθμοί
-                </label>
+            return (
+              <div
+                key={index}
+                className="grid gap-3 rounded-xl border p-3 md:grid-cols-[1.6fr_180px_110px_140px_120px]"
+              >
+                <div className="relative">
+                  <label className="mb-1 block text-sm font-medium">Προϊόν</label>
 
-                <div className="space-y-2">
-                  {row.productId !== "" && row.itemSerialNumbers.length > 0 ? (
-                    row.itemSerialNumbers.map((serial, serialIndex) => (
+                  <input
+                    value={row.productSearch}
+                    onChange={(e) => handleProductSearchChange(index, e.target.value)}
+                    onFocus={() => {
+                      if (row.productSearch.trim().length >= 2) {
+                        updateRow(index, { productSuggestionsOpen: true });
+                      }
+                    }}
+                    placeholder="Αναζήτηση προϊόντος π.χ. πα..."
+                    className="mb-2 w-full rounded-xl border px-4 py-3 outline-none transition focus:border-black"
+                  />
+
+                  {row.productSuggestionsOpen && suggestions.length > 0 && (
+                    <div className="absolute z-20 max-h-64 w-full overflow-auto rounded-xl border bg-white shadow-lg">
+                      {suggestions.map((product) => (
+                        <button
+                          key={product.id}
+                          type="button"
+                          onClick={() => handleProductSelect(index, product)}
+                          className="block w-full border-b px-4 py-3 text-left text-sm hover:bg-gray-100"
+                        >
+                          <div className="font-medium">{product.name}</div>
+                          <div className="text-xs text-gray-500">
+                            {product.unitPrice.toFixed(2)} €
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <select
+                    value={row.productId}
+                    onChange={(e) => handleProductChange(index, e.target.value)}
+                    className="w-full rounded-xl border px-4 py-3"
+                  >
+                    <option value="">Ή επιλογή από λίστα</option>
+                    {filteredProducts.map((product) => (
+                      <option key={product.id} value={product.id}>
+                        {product.name} ({product.unitPrice.toFixed(2)} €)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium">
+                    Μοναδικοί αριθμοί
+                  </label>
+
+                  <div className="space-y-2">
+                    {row.productId !== "" && row.itemSerialNumbers.length > 0 ? (
+                      row.itemSerialNumbers.map((serial, serialIndex) => (
+                        <input
+                          key={serialIndex}
+                          value={serial}
+                          readOnly
+                          className="w-full rounded-xl border bg-gray-50 px-4 py-3"
+                        />
+                      ))
+                    ) : (
                       <input
-                        key={serialIndex}
-                        value={serial}
+                        value=""
                         readOnly
+                        placeholder="Αυτόματο"
                         className="w-full rounded-xl border bg-gray-50 px-4 py-3"
                       />
-                    ))
-                  ) : (
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium">
+                    Ποσότητα
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={row.quantity}
+                    onChange={(e) => {
+                      const nextQuantity = Number(e.target.value) || 1;
+                      updateRow(index, {
+                        quantity: nextQuantity,
+                      });
+                    }}
+                    className="w-full rounded-xl border px-4 py-3"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm font-medium">
+                    Τιμή μονάδας
+                  </label>
+                  <div className="relative">
                     <input
-                      value=""
+                      type="number"
+                      step="0.01"
+                      value={row.unitPrice}
                       readOnly
-                      placeholder="Αυτόματο"
-                      className="w-full rounded-xl border bg-gray-50 px-4 py-3"
+                      className="w-full rounded-xl border bg-gray-50 px-4 py-3 pr-10"
                     />
-                  )}
+
+                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
+                      €
+                    </span>
+                  </div>
                 </div>
 
-                {serviceType === "LINEN" && row.productId !== "" ? (
-                  <p className="mt-1 text-xs text-gray-500">
-                    
-                  </p>
-                ) : null}
-              </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium">Σύνολο</label>
+                  <div className="rounded-xl border bg-gray-50 px-4 py-3">
+                    {row.lineTotal.toFixed(2)} €
+                  </div>
+                </div>
 
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Ποσότητα
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  value={row.quantity}
-                  onChange={(e) => {
-                    const nextQuantity = Number(e.target.value) || 1;
-                    updateRow(index, {
-                      quantity: nextQuantity,
-                    });
-                  }}
-                  className="w-full rounded-xl border px-4 py-3"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-medium">
-                  Τιμή μονάδας
-                </label>
-                <div className="relative">
-  <input
-    type="number"
-    step="0.01"
-    value={row.unitPrice}
-    readOnly
-    className="w-full rounded-xl border bg-gray-50 px-4 py-3 pr-10"
-  />
-
-  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
-    €
-  </span>
-</div>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-sm font-medium">Σύνολο</label>
-                <div className="rounded-xl border bg-gray-50 px-4 py-3">
-                  {row.lineTotal.toFixed(2)} €
+                <div className="md:col-span-5">
+                  <button
+                    type="button"
+                    onClick={() => removeRow(index)}
+                    className="text-sm text-red-600"
+                  >
+                    Αφαίρεση γραμμής
+                  </button>
                 </div>
               </div>
-
-              <div className="md:col-span-5">
-                <button
-                  type="button"
-                  onClick={() => removeRow(index)}
-                  className="text-sm text-red-600"
-                >
-                  Αφαίρεση γραμμής
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
 
           <div className="text-right text-lg font-bold">
             Σύνολο προϊόντων: {productsTotal.toFixed(2)} €
@@ -687,16 +754,16 @@ export default function NewOrderPageClient() {
               Συνολικό ποσό
             </label>
             <div className="relative">
-  <input
-    value={productsTotal > 0 ? productsTotal.toFixed(2) : ""}
-    readOnly
-    className="w-full rounded-xl border bg-gray-50 px-4 py-3 pr-10"
-  />
+              <input
+                value={productsTotal > 0 ? productsTotal.toFixed(2) : ""}
+                readOnly
+                className="w-full rounded-xl border bg-gray-50 px-4 py-3 pr-10"
+              />
 
-  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
-    €
-  </span>
-</div>
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
+                €
+              </span>
+            </div>
           </div>
 
           <div>
@@ -704,20 +771,20 @@ export default function NewOrderPageClient() {
               Πληρωμένο ποσό
             </label>
             <div className="relative">
-  <input
-    value={paidAmount}
-    onChange={(e) => setPaidAmount(e.target.value)}
-    type="number"
-    min="0"
-    step="0.01"
-    placeholder="Προαιρετικό"
-    className="w-full rounded-xl border px-4 py-3 pr-10"
-  />
+              <input
+                value={paidAmount}
+                onChange={(e) => setPaidAmount(e.target.value)}
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Προαιρετικό"
+                className="w-full rounded-xl border px-4 py-3 pr-10"
+              />
 
-  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
-    €
-  </span>
-</div>
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
+                €
+              </span>
+            </div>
           </div>
         </div>
 
