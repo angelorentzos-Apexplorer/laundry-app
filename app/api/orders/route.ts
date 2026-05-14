@@ -52,6 +52,10 @@ export async function POST(req: Request) {
 
     const customerId = Number(body.customerId);
     const serviceType = String(body.serviceType || "").trim();
+    const saveMode: "draft" | "final" =
+      body.saveMode === "draft" ? "draft" : "final";
+
+    const isDraft = saveMode === "draft";
 
     if (!customerId || Number.isNaN(customerId)) {
       return Response.json({ error: "Μη έγκυρος πελάτης." }, { status: 400 });
@@ -119,18 +123,29 @@ export async function POST(req: Request) {
         ? new Date(body.deliveryDate)
         : null;
 
-    let nextStatus: OrderStatus = "NEW";
-    let nextPaymentStatus: PaymentStatus = "UNPAID";
-    const nextDeliveryStatus: DeliveryStatus = "PENDING";
+    let nextStatus: OrderStatus;
 
-    if (
+    if (isDraft) {
+      nextStatus = OrderStatus.DRAFT;
+    } else if (
       totalFromRows > 0 &&
       paidAmount != null &&
       paidAmount >= totalFromRows
     ) {
-      nextStatus = "PAID";
-      nextPaymentStatus = "PAID";
+      nextStatus = OrderStatus.PAID;
+    } else {
+      nextStatus = OrderStatus.NEW;
     }
+
+    const nextPaymentStatus: PaymentStatus =
+      !isDraft &&
+      totalFromRows > 0 &&
+      paidAmount != null &&
+      paidAmount >= totalFromRows
+        ? PaymentStatus.PAID
+        : PaymentStatus.UNPAID;
+
+    const nextDeliveryStatus: DeliveryStatus = DeliveryStatus.PENDING;
 
     const order = await prisma.$transaction(async (tx) => {
       const rowsWithRealSerials: Array<{
@@ -138,7 +153,7 @@ export async function POST(req: Request) {
         quantity: number;
         unitPrice: number;
         lineTotal: number;
-        itemSerialNumber: number;
+        itemSerialNumber: number | null;
       }> = [];
 
       for (const row of validRows) {
@@ -146,6 +161,17 @@ export async function POST(req: Request) {
         const unitPrice = Number(row.unitPrice);
         const lineTotal = Number(row.lineTotal);
         const productId = Number(row.productId);
+
+        if (isDraft) {
+          rowsWithRealSerials.push({
+            productId,
+            quantity,
+            unitPrice,
+            lineTotal,
+            itemSerialNumber: null,
+          });
+          continue;
+        }
 
         if (typedServiceType === ServiceType.LINEN) {
           const realSerial = await getNextSerial(tx, typedServiceType);
@@ -194,6 +220,14 @@ export async function POST(req: Request) {
           paymentStatus: nextPaymentStatus,
           orderItems: {
             create: rowsWithRealSerials,
+          },
+          statusHistory: {
+            create: {
+              status: nextStatus,
+              notes: isDraft
+                ? "Προσωρινή αποθήκευση παραγγελίας."
+                : "Δημιουργία παραγγελίας.",
+            },
           },
         },
         include: {

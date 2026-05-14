@@ -6,6 +6,7 @@ import { OrderStatus } from "@prisma/client";
 export const dynamic = "force-dynamic";
 
 const statusLabels: Record<string, string> = {
+  DRAFT: "Προσωρινή",
   NEW: "Νέα",
   PROCESSING: "Σε επεξεργασία",
   READY: "Έτοιμη",
@@ -129,11 +130,13 @@ export default async function OrdersPage({
               className="w-full rounded-xl border px-4 py-3 outline-none transition focus:border-black"
             >
               <option value="">Όλες</option>
+              <option value="DRAFT">Προσωρινή</option>
               <option value="NEW">Νέα</option>
               <option value="PROCESSING">Σε επεξεργασία</option>
               <option value="READY">Έτοιμη</option>
               <option value="DELIVERED">Παραδόθηκε</option>
               <option value="PAID">Πληρώθηκε</option>
+              
             </select>
           </div>
 

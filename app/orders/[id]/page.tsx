@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { sendReadyNotification } from "@/lib/notifications";
-import { OrderStatus, ServiceType } from "@prisma/client";
+import { OrderStatus, Prisma, ServiceType } from "@prisma/client";
 import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import OrderItemStorageForm from "./OrderItemStorageForm";
@@ -48,6 +48,8 @@ function serviceTypeLabel(serviceType: ServiceType) {
 
 function statusLabel(status: OrderStatus) {
   switch (status) {
+    case "DRAFT":
+      return "Προσωρινή";
     case "NEW":
       return "Νέα";
     case "PROCESSING":
@@ -100,6 +102,45 @@ const ACTIVE_STORAGE_STATUSES: OrderStatus[] = [
   "READY",
   "PAID",
 ];
+
+async function getNextSerial(
+  tx: Prisma.TransactionClient,
+  serviceType: ServiceType
+) {
+  const sequenceKey =
+    serviceType === "CARPETS"
+      ? "order_item_serial_carpets"
+      : serviceType === "LINEN"
+        ? "order_item_serial_linen"
+        : "order_item_serial_clothes";
+
+  const startValue =
+    serviceType === "CARPETS" ? 22000 : serviceType === "LINEN" ? 50000 : 1000;
+
+  const existing = await tx.appSequence.findUnique({
+    where: { key: sequenceKey },
+  });
+
+  if (!existing) {
+    await tx.appSequence.create({
+      data: {
+        key: sequenceKey,
+        value: startValue,
+      },
+    });
+
+    return startValue;
+  }
+
+  const nextValue = existing.value + 1;
+
+  await tx.appSequence.update({
+    where: { key: sequenceKey },
+    data: { value: nextValue },
+  });
+
+  return nextValue;
+}
 
 type StorageActionState = {
   ok: boolean;
@@ -501,6 +542,7 @@ export default async function OrderPage({
 
     if (!currentOrder) return;
     if (currentOrder.status === nextStatus) return;
+    if (currentOrder.status === "DRAFT") return;
 
     if (nextStatus === "DELIVERED") {
       await prisma.$transaction([
@@ -598,6 +640,7 @@ export default async function OrderPage({
     });
 
     if (!currentOrder) return;
+    if (currentOrder.status === "DRAFT") return;
 
     const currentPaidAmount = currentOrder.paidAmount ?? 0;
     const remainingToPay = Math.max(0, totalPrice - currentPaidAmount);
@@ -659,6 +702,90 @@ export default async function OrderPage({
     revalidatePath("/orders");
   }
 
+  async function finalizeDraftOrder() {
+    "use server";
+
+    const currentOrder = await prisma.order.findFirst({
+      where: {
+        id: orderId,
+        isDeleted: false,
+        status: "DRAFT" as OrderStatus,
+      },
+      include: {
+        orderItems: true,
+      },
+    });
+
+    if (!currentOrder) return;
+
+    const nextStatus: OrderStatus =
+      currentOrder.totalPrice != null &&
+      currentOrder.paidAmount != null &&
+      currentOrder.paidAmount >= currentOrder.totalPrice
+        ? "PAID"
+        : "NEW";
+
+    await prisma.$transaction(async (tx) => {
+      if (currentOrder.serviceType === "LINEN") {
+        for (const item of currentOrder.orderItems) {
+          if (item.itemSerialNumber == null) {
+            const serial = await getNextSerial(tx, currentOrder.serviceType);
+
+            await tx.orderItem.update({
+              where: { id: item.id },
+              data: {
+                itemSerialNumber: serial,
+              },
+            });
+          }
+        }
+      } else {
+        for (const item of currentOrder.orderItems) {
+          await tx.orderItem.delete({
+            where: { id: item.id },
+          });
+
+          for (let i = 0; i < item.quantity; i++) {
+            const serial = await getNextSerial(tx, currentOrder.serviceType);
+
+            await tx.orderItem.create({
+              data: {
+                orderId,
+                productId: item.productId,
+                quantity: 1,
+                unitPrice: item.unitPrice,
+                lineTotal: item.unitPrice,
+                itemSerialNumber: serial,
+              },
+            });
+          }
+        }
+      }
+
+      await tx.order.update({
+        where: { id: orderId },
+        data: {
+          status: nextStatus,
+          paymentStatus: nextStatus === "PAID" ? "PAID" : "UNPAID",
+          deliveryStatus: "PENDING",
+        },
+      });
+
+      await tx.orderStatusHistory.create({
+        data: {
+          orderId,
+          status: nextStatus,
+          notes: "Οριστικοποίηση προσωρινής παραγγελίας.",
+        },
+      });
+    });
+
+    revalidatePath(`/orders/${orderId}`);
+    revalidatePath("/orders");
+    revalidatePath("/");
+    revalidatePath(customerPagePath);
+  }
+
   async function deleteOrder() {
     "use server";
 
@@ -712,6 +839,17 @@ export default async function OrderPage({
           </div>
 
           <div className="flex flex-wrap gap-3">
+            {order.status === ("DRAFT" as OrderStatus) ? (
+              <form action={finalizeDraftOrder}>
+                <button
+                  type="submit"
+                  className="rounded-xl bg-black px-4 py-3 text-white transition duration-150 hover:bg-gray-800 active:scale-[0.98]"
+                >
+                  Οριστικοποίηση παραγγελίας
+                </button>
+              </form>
+            ) : null}
+
             <a href={`/orders/${order.id}/edit`} className={getButtonClass()}>
               Επεξεργασία παραγγελίας
             </a>
@@ -738,6 +876,12 @@ export default async function OrderPage({
           </div>
         </div>
       </div>
+
+      {order.status === ("DRAFT" as OrderStatus) ? (
+        <section className="rounded-2xl border bg-yellow-50 p-4 text-sm text-yellow-900">
+          Η παραγγελία είναι προσωρινή. Οι μοναδικοί αριθμοί προϊόντων θα δημιουργηθούν όταν πατήσεις οριστικοποίηση.
+        </section>
+      ) : null}
 
       <section className="space-y-3 rounded-2xl border bg-white p-6">
         <h2 className="text-lg font-bold">Στοιχεία παραγγελίας</h2>
@@ -880,61 +1024,63 @@ export default async function OrderPage({
           </div>
         </div>
 
-        <form action={addPayment} className="grid gap-4 md:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-sm font-medium">Ποσό πληρωμής</label>
-            <div className="relative">
-              <input
-                name="amount"
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="π.χ. 20"
-                className="w-full rounded-xl border px-4 py-3 pr-10"
-              />
+        {order.status !== ("DRAFT" as OrderStatus) ? (
+          <form action={addPayment} className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-sm font-medium">Ποσό πληρωμής</label>
+              <div className="relative">
+                <input
+                  name="amount"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="π.χ. 20"
+                  className="w-full rounded-xl border px-4 py-3 pr-10"
+                />
 
-              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
-                €
-              </span>
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
+                  €
+                </span>
+              </div>
             </div>
-          </div>
 
-          <div>
-            <label className="mb-1 block text-sm font-medium">
-              Ημερομηνία πληρωμής
-            </label>
-            <input
-              name="paymentDate"
-              type="date"
-              defaultValue={formatDateForInput(new Date())}
-              className="w-full rounded-xl border px-4 py-3"
-            />
-          </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium">
+                Ημερομηνία πληρωμής
+              </label>
+              <input
+                name="paymentDate"
+                type="date"
+                defaultValue={formatDateForInput(new Date())}
+                className="w-full rounded-xl border px-4 py-3"
+              />
+            </div>
 
-          <div className="md:col-span-2">
-            <label className="mb-1 block text-sm font-medium">Σημείωση πληρωμής</label>
-            <input
-              name="paymentNotes"
-              placeholder="π.χ. 2η προκαταβολή ή εξόφληση"
-              className="w-full rounded-xl border px-4 py-3"
-            />
-          </div>
+            <div className="md:col-span-2">
+              <label className="mb-1 block text-sm font-medium">Σημείωση πληρωμής</label>
+              <input
+                name="paymentNotes"
+                placeholder="π.χ. 2η προκαταβολή ή εξόφληση"
+                className="w-full rounded-xl border px-4 py-3"
+              />
+            </div>
 
-          <div className="md:col-span-2 flex flex-wrap gap-3">
-            <button type="submit" className={getButtonClass()}>
-              Καταχώρηση νέας πληρωμής
-            </button>
+            <div className="md:col-span-2 flex flex-wrap gap-3">
+              <button type="submit" className={getButtonClass()}>
+                Καταχώρηση νέας πληρωμής
+              </button>
 
-            <button
-              type="submit"
-              name="returnToCustomer"
-              value="1"
-              className={getButtonClass()}
-            >
-              Καταχώρηση πληρωμής και επιστροφή στον πελάτη
-            </button>
-          </div>
-        </form>
+              <button
+                type="submit"
+                name="returnToCustomer"
+                value="1"
+                className={getButtonClass()}
+              >
+                Καταχώρηση πληρωμής και επιστροφή στον πελάτη
+              </button>
+            </div>
+          </form>
+        ) : null}
 
         <form action={updateFinancials} className="grid gap-4 md:grid-cols-2">
           <div>
@@ -1036,10 +1182,16 @@ export default async function OrderPage({
           <div className="text-xl font-bold">{statusLabel(order.status)}</div>
         </div>
 
-        <OrderStatusActions
-          currentStatus={order.status}
-          action={updateStatus}
-        />
+        {order.status !== ("DRAFT" as OrderStatus) ? (
+          <OrderStatusActions
+            currentStatus={order.status}
+            action={updateStatus}
+          />
+        ) : (
+          <p className="text-sm text-gray-500">
+            Η αλλαγή κατάστασης θα ενεργοποιηθεί μετά την οριστικοποίηση.
+          </p>
+        )}
       </section>
 
       <section className="space-y-4 rounded-2xl border bg-white p-6">
@@ -1075,54 +1227,56 @@ export default async function OrderPage({
         )}
       </section>
 
-      <section className="space-y-4 rounded-2xl border bg-white p-6">
-        <h2 className="text-lg font-bold">Παράδοση και εξόφληση</h2>
+      {order.status !== ("DRAFT" as OrderStatus) ? (
+        <section className="space-y-4 rounded-2xl border bg-white p-6">
+          <h2 className="text-lg font-bold">Παράδοση και εξόφληση</h2>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="rounded-xl bg-gray-50 p-4">
-            <div className="text-sm text-gray-500">Κατάσταση παράδοσης</div>
-            <div className="text-xl font-bold">
-              {deliveryStatusLabel(order.deliveryStatus)}
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="rounded-xl bg-gray-50 p-4">
+              <div className="text-sm text-gray-500">Κατάσταση παράδοσης</div>
+              <div className="text-xl font-bold">
+                {deliveryStatusLabel(order.deliveryStatus)}
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-gray-50 p-4">
+              <div className="text-sm text-gray-500">Κατάσταση εξόφλησης</div>
+              <div className="text-xl font-bold">
+                {paymentStatusLabel(order.paymentStatus)}
+              </div>
             </div>
           </div>
 
-          <div className="rounded-xl bg-gray-50 p-4">
-            <div className="text-sm text-gray-500">Κατάσταση εξόφλησης</div>
-            <div className="text-xl font-bold">
-              {paymentStatusLabel(order.paymentStatus)}
+          <form action={markDeliveredAndPaid} className="space-y-4">
+            <div>
+              <label className="mb-1 block text-sm font-medium">
+                Τελική τιμή παραγγελίας (€)
+              </label>
+
+              <div className="relative">
+                <input
+                  name="totalPrice"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  defaultValue={order.totalPrice ?? ""}
+                  className="w-full rounded-xl border px-4 py-3 pr-10"
+                />
+
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
+                  €
+                </span>
+              </div>
             </div>
-          </div>
-        </div>
 
-        <form action={markDeliveredAndPaid} className="space-y-4">
-          <div>
-            <label className="mb-1 block text-sm font-medium">
-              Τελική τιμή παραγγελίας (€)
-            </label>
-
-            <div className="relative">
-              <input
-                name="totalPrice"
-                type="number"
-                min="0"
-                step="0.01"
-                defaultValue={order.totalPrice ?? ""}
-                className="w-full rounded-xl border px-4 py-3 pr-10"
-              />
-
-              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
-                €
-              </span>
+            <div className="flex flex-wrap gap-3">
+              <button type="submit" className={getButtonClass()}>
+                Παράδοση και εξόφληση
+              </button>
             </div>
-          </div>
-
-          <div className="flex flex-wrap gap-3">
-            <button type="submit" className={getButtonClass()}>
-              Παράδοση και εξόφληση
-            </button>
-          </div>
-        </form>
-      </section>
+          </form>
+        </section>
+      ) : null}
     </main>
   );
 }

@@ -49,6 +49,7 @@ type ReceiptData = {
   totalPrice: number;
   rows: ReceiptRow[];
   createdAt: string;
+  saveMode: "draft" | "final";
 };
 
 function serviceLabel(value: ServiceType) {
@@ -268,35 +269,10 @@ export default function NewOrderPageClient() {
     });
   }
 
-  function handleProductChange(index: number, rawProductId: string) {
-    if (!rawProductId) {
-      updateRow(index, {
-        productId: "",
-        productSearch: "",
-        productSuggestionsOpen: false,
-        unitPrice: 0,
-        lineTotal: 0,
-        itemSerialNumbers: [],
-      });
-      return;
-    }
-
-    const productId = Number(rawProductId);
-    const product = filteredProducts.find((p) => p.id === productId);
-    if (!product) return;
-
-    updateRow(index, {
-      productId,
-      productSearch: product.name,
-      productSuggestionsOpen: false,
-      unitPrice: product.unitPrice,
-    });
-  }
-
   function handleProductSearchChange(index: number, value: string) {
     updateRow(index, {
       productSearch: value,
-      productSuggestionsOpen: value.trim().length >= 2,
+      productSuggestionsOpen: true,
       productId: "",
       unitPrice: 0,
       lineTotal: 0,
@@ -311,16 +287,6 @@ export default function NewOrderPageClient() {
       productSuggestionsOpen: false,
       unitPrice: product.unitPrice,
     });
-  }
-
-  function getProductSuggestions(row: Row) {
-    const q = row.productSearch.trim().toLowerCase();
-
-    if (q.length < 2) return [];
-
-    return filteredProducts
-      .filter((product) => product.name.toLowerCase().includes(q))
-      .slice(0, 8);
   }
 
   function addRow() {
@@ -352,6 +318,17 @@ export default function NewOrderPageClient() {
     setCustomerDropdownOpen(false);
   }
 
+  function getVisibleProductSuggestions(row: Row) {
+    const q = row.productSearch.trim().toLowerCase();
+
+    return filteredProducts
+      .filter((product) => {
+        if (!q) return true;
+        return product.name.toLowerCase().includes(q);
+      })
+      .slice(0, 8);
+  }
+
   useEffect(() => {
     setRows([getEmptyRow()]);
   }, [serviceType]);
@@ -369,8 +346,15 @@ export default function NewOrderPageClient() {
     return sum + row.quantity;
   }, 0);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+
+    const submitter = (e.nativeEvent as SubmitEvent).submitter as
+      | HTMLButtonElement
+      | null;
+
+    const saveMode: "draft" | "final" =
+      submitter?.value === "draft" ? "draft" : "final";
 
     if (!customerId) {
       alert("Επίλεξε πελάτη.");
@@ -384,6 +368,7 @@ export default function NewOrderPageClient() {
     );
 
     const payload = {
+      saveMode,
       customerId: Number(customerId),
       serviceType,
       itemsDescription: itemsDescription || null,
@@ -450,6 +435,7 @@ export default function NewOrderPageClient() {
         totalPrice: productsTotal,
         rows: receiptRows,
         createdAt: createdOrder.createdAt || new Date().toISOString(),
+        saveMode,
       });
 
       const freshNextSerial = await fetchNextSerialStart(serviceType);
@@ -578,7 +564,7 @@ export default function NewOrderPageClient() {
           </div>
 
           {rows.map((row, index) => {
-          
+            const suggestions = getVisibleProductSuggestions(row);
 
             return (
               <div
@@ -586,45 +572,39 @@ export default function NewOrderPageClient() {
                 className="grid gap-3 rounded-xl border p-3 md:grid-cols-[1.6fr_180px_110px_140px_120px]"
               >
                 <div className="relative">
-  <label className="mb-1 block text-sm font-medium">Προϊόν</label>
+                  <label className="mb-1 block text-sm font-medium">Προϊόν</label>
 
-  <input
-    value={row.productSearch}
-    onChange={(e) => handleProductSearchChange(index, e.target.value)}
-    onFocus={() => {
-      updateRow(index, { productSuggestionsOpen: true });
-    }}
-    placeholder="Πληκτρολόγησε προϊόν π.χ. πα..."
-    className="w-full rounded-xl border px-4 py-3 outline-none transition focus:border-black"
-  />
+                  <input
+                    value={row.productSearch}
+                    onChange={(e) =>
+                      handleProductSearchChange(index, e.target.value)
+                    }
+                    onFocus={() => {
+                      updateRow(index, { productSuggestionsOpen: true });
+                    }}
+                    placeholder="Πληκτρολόγησε προϊόν π.χ. πα..."
+                    className="w-full rounded-xl border px-4 py-3 outline-none transition focus:border-black"
+                  />
 
-  {row.productSuggestionsOpen && (
-    <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-xl border bg-white shadow-lg">
-      {filteredProducts
-        .filter((product) => {
-          const q = row.productSearch.trim().toLowerCase();
+                  {row.productSuggestionsOpen && suggestions.length > 0 && (
+                    <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-xl border bg-white shadow-lg">
+                      {suggestions.map((product) => (
+                        <button
+                          key={product.id}
+                          type="button"
+                          onClick={() => handleProductSelect(index, product)}
+                          className="block w-full border-b px-4 py-3 text-left text-sm hover:bg-gray-100"
+                        >
+                          <div className="font-medium">{product.name}</div>
+                          <div className="text-xs text-gray-500">
+                            {product.unitPrice.toFixed(2)} €
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
-          if (!q) return true;
-
-          return product.name.toLowerCase().includes(q);
-        })
-        .slice(0, 8)
-        .map((product) => (
-          <button
-            key={product.id}
-            type="button"
-            onClick={() => handleProductSelect(index, product)}
-            className="block w-full border-b px-4 py-3 text-left text-sm hover:bg-gray-100"
-          >
-            <div className="font-medium">{product.name}</div>
-            <div className="text-xs text-gray-500">
-              {product.unitPrice.toFixed(2)} €
-            </div>
-          </button>
-        ))}
-    </div>
-  )}
-</div>
                 <div>
                   <label className="mb-1 block text-sm font-medium">
                     Μοναδικοί αριθμοί
@@ -817,24 +797,41 @@ export default function NewOrderPageClient() {
           />
         </div>
 
-        <button
-          disabled={loading}
-          className="rounded-xl bg-black px-5 py-3 text-white disabled:opacity-50"
-        >
-          {loading ? "Αποθήκευση..." : "Αποθήκευση παραγγελίας"}
-        </button>
+        <div className="flex flex-wrap gap-3">
+          <button
+            type="submit"
+            name="saveMode"
+            value="draft"
+            disabled={loading}
+            className="rounded-xl border border-black bg-white px-5 py-3 text-black transition duration-150 hover:bg-gray-100 active:scale-[0.98] disabled:opacity-50"
+          >
+            {loading ? "Αποθήκευση..." : "Προσωρινή αποθήκευση"}
+          </button>
+
+          <button
+            type="submit"
+            name="saveMode"
+            value="final"
+            disabled={loading}
+            className="rounded-xl bg-black px-5 py-3 text-white disabled:opacity-50"
+          >
+            {loading ? "Αποθήκευση..." : "Οριστική αποθήκευση παραγγελίας"}
+          </button>
+        </div>
       </form>
 
       {receipt && (
         <>
           <div className="no-print flex flex-wrap gap-3 rounded-2xl border bg-green-50 p-4">
-            <button
-              type="button"
-              onClick={handlePrintReceipt}
-              className="rounded-xl bg-black px-5 py-3 text-white"
-            >
-              Εκτύπωση δελτίου παραλαβής
-            </button>
+            {receipt.saveMode === "final" ? (
+              <button
+                type="button"
+                onClick={handlePrintReceipt}
+                className="rounded-xl bg-black px-5 py-3 text-white"
+              >
+                Εκτύπωση δελτίου παραλαβής
+              </button>
+            ) : null}
 
             <button
               type="button"
@@ -852,6 +849,12 @@ export default function NewOrderPageClient() {
               Επιστροφή στον πελάτη
             </button>
           </div>
+
+          {receipt.saveMode === "draft" ? (
+            <div className="no-print rounded-2xl border bg-yellow-50 p-4 text-sm text-yellow-900">
+              Η παραγγελία αποθηκεύτηκε προσωρινά. Δεν έχουν δεσμευτεί μοναδικοί αριθμοί προϊόντων.
+            </div>
+          ) : null}
 
           <section className="print-receipt mt-8 rounded-2xl border bg-white p-4 text-[12px] leading-tight">
             <div className="mb-3 text-center">

@@ -97,10 +97,12 @@ enum ServiceType {
 }
 
 enum OrderStatus {
+  DRAFT
   NEW
   PROCESSING
   READY
   DELIVERED
+  CANCELLED
   PAID
 }
 
