@@ -4,7 +4,7 @@ import HiddenMoneyBox from "./HiddenMoneyBox";
 
 export const dynamic = "force-dynamic";
 
-type SearchType = "customer" | "serial" | "full";
+type SearchType = "customer" | "serial" | "chain" | "full";
 
 function getButtonClass() {
   return "rounded-xl border border-black bg-white px-3 py-2 text-black transition duration-150 hover:bg-gray-100 active:scale-[0.98] active:bg-black active:text-white";
@@ -42,14 +42,26 @@ function normalizePhoneSearch(q: string) {
     : digits.replace(/^0+/, "");
 
   return Array.from(
-    new Set([q, digits, withoutCountryCode, `30${withoutCountryCode}`, `+30${withoutCountryCode}`])
+    new Set([
+      q,
+      digits,
+      withoutCountryCode,
+      `30${withoutCountryCode}`,
+      `+30${withoutCountryCode}`,
+    ])
   ).filter(Boolean);
 }
 
 function normalizeSearchType(value: string): SearchType {
-  if (value === "customer" || value === "serial" || value === "full") {
+  if (
+    value === "customer" ||
+    value === "serial" ||
+    value === "chain" ||
+    value === "full"
+  ) {
     return value;
   }
+
   return "full";
 }
 
@@ -59,6 +71,10 @@ function searchTypeLabel(searchType: SearchType) {
       return "Τηλέφωνο / επώνυμο πελάτη";
     case "serial":
       return "Μοναδικός αριθμός ρούχου";
+    case "chain":
+      return "Αριθμός αλυσίδας";
+    case "full":
+      return "Πλήρης αναζήτηση";
     default:
       return "Πλήρης αναζήτηση";
   }
@@ -102,8 +118,12 @@ export default async function HomePage({
     prisma.order.count({ where: { isDeleted: false, status: "NEW" } }),
     prisma.order.count({ where: { isDeleted: false, status: "READY" } }),
     prisma.customer.count(),
-    prisma.order.count({ where: { isDeleted: false, createdAt: { gte: dayStart } } }),
-    prisma.order.count({ where: { isDeleted: false, createdAt: { gte: weekStart } } }),
+    prisma.order.count({
+      where: { isDeleted: false, createdAt: { gte: dayStart } },
+    }),
+    prisma.order.count({
+      where: { isDeleted: false, createdAt: { gte: weekStart } },
+    }),
     prisma.orderPayment.aggregate({
       where: { paymentDate: { gte: dayStart } },
       _sum: { amount: true },
@@ -147,12 +167,43 @@ export default async function HomePage({
     orderItems: Array<{
       id: number;
       itemSerialNumber: number | null;
+      storageChainNumber: string | null;
       product: {
         id: number;
         name: string;
       } | null;
     }>;
   }> = [];
+
+  const orderSelect = {
+    id: true,
+    storageChainNumber: true,
+    itemsDescription: true,
+    status: true,
+    customer: {
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        fullName: true,
+        phone: true,
+      },
+    },
+    orderItems: {
+      select: {
+        id: true,
+        itemSerialNumber: true,
+        storageChainNumber: true,
+        product: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+      orderBy: { id: "asc" as const },
+    },
+  };
 
   if (q) {
     if (searchType === "customer") {
@@ -184,29 +235,7 @@ export default async function HomePage({
                 isDeleted: false,
                 customerId: { in: customerIds },
               },
-              select: {
-                id: true,
-                storageChainNumber: true,
-                itemsDescription: true,
-                status: true,
-                customer: {
-                  select: {
-                    id: true,
-                    firstName: true,
-                    lastName: true,
-                    fullName: true,
-                    phone: true,
-                  },
-                },
-                orderItems: {
-                  select: {
-                    id: true,
-                    itemSerialNumber: true,
-                    product: { select: { id: true, name: true } },
-                  },
-                  orderBy: { id: "asc" },
-                },
-              },
+              select: orderSelect,
               take: 50,
               orderBy: { createdAt: "desc" },
             })
@@ -219,36 +248,35 @@ export default async function HomePage({
             where: {
               isDeleted: false,
               orderItems: {
-                some: { itemSerialNumber: numericQuery },
-              },
-            },
-            select: {
-              id: true,
-              storageChainNumber: true,
-              itemsDescription: true,
-              status: true,
-              customer: {
-                select: {
-                  id: true,
-                  firstName: true,
-                  lastName: true,
-                  fullName: true,
-                  phone: true,
+                some: {
+                  itemSerialNumber: numericQuery,
                 },
               },
-              orderItems: {
-                select: {
-                  id: true,
-                  itemSerialNumber: true,
-                  product: { select: { id: true, name: true } },
-                },
-                orderBy: { id: "asc" },
-              },
             },
+            select: orderSelect,
             take: 20,
             orderBy: { createdAt: "desc" },
           })
         : [];
+    }
+
+    if (searchType === "chain") {
+      orderResults = await prisma.order.findMany({
+        where: {
+          isDeleted: false,
+          orderItems: {
+            some: {
+              storageChainNumber: {
+                contains: q,
+                mode: "insensitive",
+              },
+            },
+          },
+        },
+        select: orderSelect,
+        take: 20,
+        orderBy: { createdAt: "desc" },
+      });
     }
 
     if (searchType === "full") {
@@ -284,50 +312,46 @@ export default async function HomePage({
             isDeleted: false,
             OR: [
               ...(isDbInt ? [{ id: numericQuery }] : []),
+
               ...(isDbInt
                 ? [
                     {
                       orderItems: {
-                        some: { itemSerialNumber: numericQuery },
+                        some: {
+                          itemSerialNumber: numericQuery,
+                        },
                       },
                     },
                   ]
                 : []),
+
+              {
+                orderItems: {
+                  some: {
+                    storageChainNumber: {
+                      contains: q,
+                      mode: "insensitive",
+                    },
+                  },
+                },
+              },
+
               { storageChainNumber: { contains: q, mode: "insensitive" } },
               { itemsDescription: { contains: q, mode: "insensitive" } },
               { notes: { contains: q, mode: "insensitive" } },
               { customer: { fullName: { contains: q, mode: "insensitive" } } },
               { customer: { lastName: { contains: q, mode: "insensitive" } } },
+
               ...(shouldSearchPhoneInFull
                 ? phoneVariants.map((phone) => ({
-                    customer: { phone: { contains: phone } },
+                    customer: {
+                      phone: { contains: phone },
+                    },
                   }))
                 : []),
             ],
           },
-          select: {
-            id: true,
-            storageChainNumber: true,
-            itemsDescription: true,
-            status: true,
-            customer: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                fullName: true,
-                phone: true,
-              },
-            },
-            orderItems: {
-              select: {
-                id: true,
-                itemSerialNumber: true,
-                product: { select: { id: true, name: true } },
-              },
-              orderBy: { id: "asc" },
-            },
-          },
+          select: orderSelect,
           take: 20,
           orderBy: { createdAt: "desc" },
         }),
@@ -360,59 +384,49 @@ export default async function HomePage({
         </div>
 
         <form action="/" method="GET" className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-3">
-            <label
-              className={[
-                "flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 transition",
-                searchType === "customer"
-                  ? "border-black bg-black text-white"
-                  : "bg-white hover:bg-gray-100",
-              ].join(" ")}
-            >
+          <div className="flex flex-wrap gap-5">
+            <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
               <input
-                type="checkbox"
+                type="radio"
                 name="searchType"
                 value="customer"
                 defaultChecked={searchType === "customer"}
-                className="h-4 w-4"
+                className="h-4 w-4 accent-black"
               />
-              <span className="text-sm font-medium">Τηλέφωνο / Επώνυμο</span>
+              Τηλέφωνο / Επώνυμο
             </label>
 
-            <label
-              className={[
-                "flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 transition",
-                searchType === "serial"
-                  ? "border-black bg-black text-white"
-                  : "bg-white hover:bg-gray-100",
-              ].join(" ")}
-            >
+            <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
               <input
-                type="checkbox"
+                type="radio"
                 name="searchType"
                 value="serial"
                 defaultChecked={searchType === "serial"}
-                className="h-4 w-4"
+                className="h-4 w-4 accent-black"
               />
-              <span className="text-sm font-medium">Μοναδικός αριθμός</span>
+              Μοναδικός αριθμός
             </label>
 
-            <label
-              className={[
-                "flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 transition",
-                searchType === "full"
-                  ? "border-black bg-black text-white"
-                  : "bg-white hover:bg-gray-100",
-              ].join(" ")}
-            >
+            <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
               <input
-                type="checkbox"
+                type="radio"
+                name="searchType"
+                value="chain"
+                defaultChecked={searchType === "chain"}
+                className="h-4 w-4 accent-black"
+              />
+              Αριθμός αλυσίδας
+            </label>
+
+            <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">
+              <input
+                type="radio"
                 name="searchType"
                 value="full"
                 defaultChecked={searchType === "full"}
-                className="h-4 w-4"
+                className="h-4 w-4 accent-black"
               />
-              <span className="text-sm font-medium">Πλήρης αναζήτηση</span>
+              Πλήρης αναζήτηση
             </label>
           </div>
 
@@ -426,7 +440,9 @@ export default async function HomePage({
                   ? "Πληκτρολόγησε τηλέφωνο ή επώνυμο πελάτη..."
                   : searchType === "serial"
                     ? "Πληκτρολόγησε μοναδικό αριθμό ρούχου..."
-                    : "Πληκτρολόγησε επώνυμο, τηλέφωνο, Νο αποθήκευσης, περιγραφή ή αριθμό προϊόντος..."
+                    : searchType === "chain"
+                      ? "Πληκτρολόγησε αριθμό αλυσίδας..."
+                      : "Πληκτρολόγησε επώνυμο, τηλέφωνο, Νο αποθήκευσης, περιγραφή, αριθμό προϊόντος ή αλυσίδας..."
               }
               className="w-full rounded-xl border px-4 py-3 outline-none transition focus:border-black"
             />
@@ -462,7 +478,7 @@ export default async function HomePage({
           </div>
         ) : (
           <div className="space-y-6">
-            {searchType !== "serial" ? (
+            {searchType !== "serial" && searchType !== "chain" ? (
               <div className="space-y-3">
                 <h3 className="text-lg font-semibold">Πελάτες</h3>
 
@@ -520,6 +536,15 @@ export default async function HomePage({
                           )
                         : null;
 
+                    const matchedChainItem =
+                      order.orderItems.length > 0
+                        ? order.orderItems.find((item) =>
+                            item.storageChainNumber
+                              ?.toLowerCase()
+                              .includes(q.toLowerCase())
+                          )
+                        : null;
+
                     return (
                       <Link
                         key={order.id}
@@ -557,6 +582,18 @@ export default async function HomePage({
                                 </span>
                                 {matchedItem.product?.name
                                   ? ` • ${matchedItem.product.name}`
+                                  : ""}
+                              </div>
+                            ) : null}
+
+                            {matchedChainItem ? (
+                              <div className="text-sm text-gray-600">
+                                Βρέθηκε από αριθμό αλυσίδας:{" "}
+                                <span className="font-medium">
+                                  {matchedChainItem.storageChainNumber}
+                                </span>
+                                {matchedChainItem.product?.name
+                                  ? ` • ${matchedChainItem.product.name}`
                                   : ""}
                               </div>
                             ) : null}
