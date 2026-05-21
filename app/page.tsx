@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import HiddenMoneyBox from "./HiddenMoneyBox";
+
 export const dynamic = "force-dynamic";
+
+type SearchType = "customer" | "serial" | "full";
 
 function getButtonClass() {
   return "rounded-xl border border-black bg-white px-3 py-2 text-black transition duration-150 hover:bg-gray-100 active:scale-[0.98] active:bg-black active:text-white";
@@ -53,13 +56,38 @@ function normalizePhoneSearch(q: string) {
   );
 }
 
+function normalizeSearchType(value: string): SearchType {
+  if (value === "customer" || value === "serial" || value === "full") {
+    return value;
+  }
+
+  return "full";
+}
+
+function searchTypeLabel(searchType: SearchType) {
+  switch (searchType) {
+    case "customer":
+      return "Τηλέφωνο / επώνυμο πελάτη";
+    case "serial":
+      return "Μοναδικός αριθμός ρούχου";
+    case "full":
+      return "Πλήρης αναζήτηση";
+    default:
+      return "Πλήρης αναζήτηση";
+  }
+}
+
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams?: Promise<{ q?: string }>;
+  searchParams?: Promise<{ q?: string; searchType?: string }>;
 }) {
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
+
   const q = String(resolvedSearchParams?.q || "").trim();
+  const searchType = normalizeSearchType(
+    String(resolvedSearchParams?.searchType || "full").trim()
+  );
 
   const numericQuery = Number(q);
 
@@ -87,19 +115,46 @@ export default async function HomePage({
     paymentsMonthAgg,
   ] = await Promise.all([
     prisma.order.count({
-  where: {
-    isDeleted: false,
-  },
-}),
-    prisma.order.count({ where: { status: "NEW" } }),
-    prisma.order.count({ where: { status: "READY" } }),
+      where: {
+        isDeleted: false,
+      },
+    }),
+
+    prisma.order.count({
+      where: {
+        isDeleted: false,
+        status: "NEW",
+      },
+    }),
+
+    prisma.order.count({
+      where: {
+        isDeleted: false,
+        status: "READY",
+      },
+    }),
+
     prisma.customer.count(),
-    prisma.order.count({ where: { createdAt: { gte: dayStart } } }),
-    prisma.order.count({ where: { createdAt: { gte: weekStart } } }),
+
+    prisma.order.count({
+      where: {
+        isDeleted: false,
+        createdAt: { gte: dayStart },
+      },
+    }),
+
+    prisma.order.count({
+      where: {
+        isDeleted: false,
+        createdAt: { gte: weekStart },
+      },
+    }),
+
     prisma.orderPayment.aggregate({
       where: { paymentDate: { gte: dayStart } },
       _sum: { amount: true },
     }),
+
     prisma.orderPayment.aggregate({
       where: { paymentDate: { gte: monthStart } },
       _sum: { amount: true },
@@ -147,8 +202,8 @@ export default async function HomePage({
   }> = [];
 
   if (q) {
-    [customerResults, orderResults] = await Promise.all([
-      prisma.customer.findMany({
+    if (searchType === "customer") {
+      customerResults = await prisma.customer.findMany({
         where: {
           OR: [
             { lastName: { contains: q, mode: "insensitive" } },
@@ -167,87 +222,207 @@ export default async function HomePage({
         },
         take: 20,
         orderBy: { createdAt: "desc" },
-      }),
+      });
 
-      prisma.order.findMany({
-  where: {
-    isDeleted: false,
-          OR: [
-            ...(isDbInt ? [{ id: numericQuery }] : []),
+      const customerIds = customerResults.map((customer) => customer.id);
 
-            ...(isDbInt
-              ? [
-                  {
-                    orderItems: {
-                      some: {
-                        itemSerialNumber: numericQuery,
+      orderResults =
+        customerIds.length > 0
+          ? await prisma.order.findMany({
+              where: {
+                isDeleted: false,
+                customerId: {
+                  in: customerIds,
+                },
+              },
+              select: {
+                id: true,
+                storageChainNumber: true,
+                itemsDescription: true,
+                status: true,
+                customer: {
+                  select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                    fullName: true,
+                    phone: true,
+                  },
+                },
+                orderItems: {
+                  select: {
+                    id: true,
+                    itemSerialNumber: true,
+                    product: {
+                      select: {
+                        id: true,
+                        name: true,
                       },
                     },
                   },
-                ]
-              : []),
-
-            { storageChainNumber: { contains: q, mode: "insensitive" } },
-            { itemsDescription: { contains: q, mode: "insensitive" } },
-            { notes: { contains: q, mode: "insensitive" } },
-
-            {
-              customer: {
-                fullName: { contains: q, mode: "insensitive" },
+                  orderBy: { id: "asc" },
+                },
               },
-            },
+              take: 50,
+              orderBy: { createdAt: "desc" },
+            })
+          : [];
+    }
 
-            {
-              customer: {
-                lastName: { contains: q, mode: "insensitive" },
-              },
-            },
-
-            ...phoneVariants.map((phone) => ({
-              customer: {
-                phone: { contains: phone },
-              },
-            })),
-          ],
-        },
-        select: {
-          id: true,
-          storageChainNumber: true,
-          itemsDescription: true,
-          status: true,
-          customer: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              fullName: true,
-              phone: true,
-            },
-          },
-          orderItems: {
-            select: {
-              id: true,
-              itemSerialNumber: true,
-              product: {
-                select: {
-                  id: true,
-                  name: true,
+    if (searchType === "serial") {
+      orderResults = isDbInt
+        ? await prisma.order.findMany({
+            where: {
+              isDeleted: false,
+              orderItems: {
+                some: {
+                  itemSerialNumber: numericQuery,
                 },
               },
             },
-            orderBy: { id: "asc" },
+            select: {
+              id: true,
+              storageChainNumber: true,
+              itemsDescription: true,
+              status: true,
+              customer: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  fullName: true,
+                  phone: true,
+                },
+              },
+              orderItems: {
+                select: {
+                  id: true,
+                  itemSerialNumber: true,
+                  product: {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
+                  },
+                },
+                orderBy: { id: "asc" },
+              },
+            },
+            take: 20,
+            orderBy: { createdAt: "desc" },
+          })
+        : [];
+    }
+
+    if (searchType === "full") {
+      const shouldSearchPhoneInFull = !isNumeric;
+
+      [customerResults, orderResults] = await Promise.all([
+        prisma.customer.findMany({
+          where: {
+            OR: [
+              { lastName: { contains: q, mode: "insensitive" } },
+              { fullName: { contains: q, mode: "insensitive" } },
+
+              ...(shouldSearchPhoneInFull
+                ? phoneVariants.map((phone) => ({
+                    phone: { contains: phone },
+                  }))
+                : []),
+            ],
           },
-        },
-        take: 20,
-        orderBy: { createdAt: "desc" },
-      }),
-    ]);
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            fullName: true,
+            phone: true,
+          },
+          take: 20,
+          orderBy: { createdAt: "desc" },
+        }),
+
+        prisma.order.findMany({
+          where: {
+            isDeleted: false,
+            OR: [
+              ...(isDbInt ? [{ id: numericQuery }] : []),
+
+              ...(isDbInt
+                ? [
+                    {
+                      orderItems: {
+                        some: {
+                          itemSerialNumber: numericQuery,
+                        },
+                      },
+                    },
+                  ]
+                : []),
+
+              { storageChainNumber: { contains: q, mode: "insensitive" } },
+              { itemsDescription: { contains: q, mode: "insensitive" } },
+              { notes: { contains: q, mode: "insensitive" } },
+
+              {
+                customer: {
+                  fullName: { contains: q, mode: "insensitive" },
+                },
+              },
+
+              {
+                customer: {
+                  lastName: { contains: q, mode: "insensitive" },
+                },
+              },
+
+              ...(shouldSearchPhoneInFull
+                ? phoneVariants.map((phone) => ({
+                    customer: {
+                      phone: { contains: phone },
+                    },
+                  }))
+                : []),
+            ],
+          },
+          select: {
+            id: true,
+            storageChainNumber: true,
+            itemsDescription: true,
+            status: true,
+            customer: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                fullName: true,
+                phone: true,
+              },
+            },
+            orderItems: {
+              select: {
+                id: true,
+                itemSerialNumber: true,
+                product: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
+              },
+              orderBy: { id: "asc" },
+            },
+          },
+          take: 20,
+          orderBy: { createdAt: "desc" },
+        }),
+      ]);
+    }
   }
 
   const hasResults = customerResults.length > 0 || orderResults.length > 0;
 
   return (
-  
     <main className="space-y-8">
       <section className="space-y-5 rounded-2xl border bg-white p-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -260,21 +435,43 @@ export default async function HomePage({
             <Link href="/customers/new" className={getButtonClass()}>
               Νέος πελάτης
             </Link>
+
             <Link href="/orders/new" className={getButtonClass()}>
               Νέα παραγγελία
             </Link>
+
             <Link href="/customers" className={getButtonClass()}>
               Πελάτες
             </Link>
           </div>
         </div>
 
-        <form action="/" method="GET" className="flex flex-col gap-3 md:flex-row">
+        <form
+          action="/"
+          method="GET"
+          className="grid gap-3 md:grid-cols-[240px_1fr_auto]"
+        >
+          <select
+            name="searchType"
+            defaultValue={searchType}
+            className="w-full rounded-xl border px-4 py-3 outline-none transition focus:border-black"
+          >
+            <option value="customer">Τηλέφωνο / επώνυμο πελάτη</option>
+            <option value="serial">Μοναδικός αριθμός ρούχου</option>
+            <option value="full">Πλήρης αναζήτηση</option>
+          </select>
+
           <input
             type="text"
             name="q"
             defaultValue={q}
-            placeholder="Πληκτρολόγησε επώνυμο, τηλέφωνο, Νο αποθήκευσης, περιγραφή ή αριθμό προϊόντος..."
+            placeholder={
+              searchType === "customer"
+                ? "Πληκτρολόγησε τηλέφωνο ή επώνυμο πελάτη..."
+                : searchType === "serial"
+                  ? "Πληκτρολόγησε μοναδικό αριθμό ρούχου..."
+                  : "Πληκτρολόγησε επώνυμο, Νο αποθήκευσης, περιγραφή ή αριθμό προϊόντος..."
+            }
             className="w-full rounded-xl border px-4 py-3 outline-none transition focus:border-black"
           />
 
@@ -295,9 +492,10 @@ export default async function HomePage({
       <section className="space-y-5 rounded-2xl border bg-white p-6">
         <div>
           <h2 className="text-2xl font-bold">Αποτελέσματα αναζήτησης</h2>
+
           <p className="mt-2 text-gray-600">
             {q
-              ? `Αποτελέσματα για: ${q}`
+              ? `Αποτελέσματα για: ${q} • Τύπος: ${searchTypeLabel(searchType)}`
               : "Πληκτρολόγησε κάτι στην αναζήτηση για να εμφανιστούν αποτελέσματα."}
           </p>
         </div>
@@ -308,44 +506,47 @@ export default async function HomePage({
           </div>
         ) : (
           <div className="space-y-6">
-            <div className="space-y-3">
-              <h3 className="text-lg font-semibold">Πελάτες</h3>
+            {searchType !== "serial" ? (
+              <div className="space-y-3">
+                <h3 className="text-lg font-semibold">Πελάτες</h3>
 
-              {customerResults.length === 0 ? (
-                <div className="rounded-xl border bg-gray-50 p-4 text-gray-600">
-                  Δεν βρέθηκαν πελάτες.
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {customerResults.map((customer) => (
-                    <Link
-                      key={customer.id}
-                      href={`/customers/${customer.id}`}
-                      className="block rounded-xl border bg-gray-50 p-4 transition hover:bg-gray-100"
-                    >
-                      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                        <div>
-                          <div className="text-lg font-bold">
-                            {customer.fullName ||
-                              `${customer.firstName || ""} ${
-                                customer.lastName || ""
-                              }`.trim() ||
-                              `Πελάτης #${customer.id}`}
+                {customerResults.length === 0 ? (
+                  <div className="rounded-xl border bg-gray-50 p-4 text-gray-600">
+                    Δεν βρέθηκαν πελάτες.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {customerResults.map((customer) => (
+                      <Link
+                        key={customer.id}
+                        href={`/customers/${customer.id}`}
+                        className="block rounded-xl border bg-gray-50 p-4 transition hover:bg-gray-100"
+                      >
+                        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <div className="text-lg font-bold">
+                              {customer.fullName ||
+                                `${customer.firstName || ""} ${
+                                  customer.lastName || ""
+                                }`.trim() ||
+                                `Πελάτης #${customer.id}`}
+                            </div>
+
+                            <div className="text-sm text-gray-600">
+                              Τηλέφωνο: {customer.phone || "-"}
+                            </div>
                           </div>
+
                           <div className="text-sm text-gray-600">
-                            Τηλέφωνο: {customer.phone || "-"}
+                            ID πελάτη: #{customer.id}
                           </div>
                         </div>
-
-                        <div className="text-sm text-gray-600">
-                          ID πελάτη: #{customer.id}
-                        </div>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </div>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : null}
 
             <div className="space-y-3">
               <h3 className="text-lg font-semibold">Παραγγελίες</h3>
@@ -375,6 +576,7 @@ export default async function HomePage({
                             <div className="text-lg font-bold">
                               Παραγγελία #{order.id}
                             </div>
+
                             <div className="text-sm text-gray-600">
                               Πελάτης:{" "}
                               {order.customer.fullName ||
@@ -383,16 +585,18 @@ export default async function HomePage({
                                 }`.trim() ||
                                 `Πελάτης #${order.customer.id}`}
                             </div>
+
                             <div className="text-sm text-gray-600">
                               Τηλέφωνο: {order.customer.phone || "-"}
                             </div>
+
                             <div className="text-sm text-gray-600">
                               Περιγραφή: {order.itemsDescription || "-"}
                             </div>
 
-                            {matchedItem && (
+                            {matchedItem ? (
                               <div className="text-sm text-gray-600">
-                                Βρέθηκε από αριθμό προϊόντος:{" "}
+                                Βρέθηκε από μοναδικό αριθμό:{" "}
                                 <span className="font-medium">
                                   {matchedItem.itemSerialNumber}
                                 </span>
@@ -400,11 +604,12 @@ export default async function HomePage({
                                   ? ` • ${matchedItem.product.name}`
                                   : ""}
                               </div>
-                            )}
+                            ) : null}
                           </div>
 
                           <div className="space-y-1 text-sm text-gray-600">
                             <div>Κατάσταση: {order.status}</div>
+
                             <div>
                               Νο Αποθήκευσης: {order.storageChainNumber || "-"}
                             </div>
@@ -419,13 +624,11 @@ export default async function HomePage({
           </div>
         )}
       </section>
-<div>
+
+      <div>
         <h1 className="text-3xl font-bold">Dashboard</h1>
-        <p className="mt-2 text-gray-600">
-        
-        </p>
+        <p className="mt-2 text-gray-600"></p>
       </div>
-      
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {cards.map((card) => (
@@ -466,14 +669,14 @@ export default async function HomePage({
           </div>
 
           <HiddenMoneyBox
-  title="Εισπράξεις σήμερα"
-  value={formatMoney(receiptsToday)}
-/>
+            title="Εισπράξεις σήμερα"
+            value={formatMoney(receiptsToday)}
+          />
 
-<HiddenMoneyBox
-  title="Εισπράξεις μήνα"
-  value={formatMoney(receiptsMonth)}
-/>
+          <HiddenMoneyBox
+            title="Εισπράξεις μήνα"
+            value={formatMoney(receiptsMonth)}
+          />
         </div>
       </section>
 
