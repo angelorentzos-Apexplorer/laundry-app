@@ -261,23 +261,31 @@ export default async function HomePage({
     }
 
     if (searchType === "chain") {
-      orderResults = await prisma.order.findMany({
-        where: {
-          isDeleted: false,
-          orderItems: {
-            some: {
-              storageChainNumber: {
-                contains: q,
+  const chainQuery = q.trim().toUpperCase();
+  const hasLetter = /[A-ZΑ-Ω]/i.test(chainQuery);
+
+  orderResults = await prisma.order.findMany({
+    where: {
+      isDeleted: false,
+      orderItems: {
+        some: {
+          storageChainNumber: hasLetter
+            ? {
+                startsWith: chainQuery,
+                mode: "insensitive",
+              }
+            : {
+                equals: chainQuery,
                 mode: "insensitive",
               },
-            },
-          },
         },
-        select: orderSelect,
-        take: 20,
-        orderBy: { createdAt: "desc" },
-      });
-    }
+      },
+    },
+    select: orderSelect,
+    take: 20,
+    orderBy: { createdAt: "desc" },
+  });
+}
 
     if (searchType === "full") {
       const phoneDigits = q.replace(/\D/g, "");
@@ -536,14 +544,19 @@ export default async function HomePage({
                           )
                         : null;
 
-                    const matchedChainItem =
-                      order.orderItems.length > 0
-                        ? order.orderItems.find((item) =>
-                            item.storageChainNumber
-                              ?.toLowerCase()
-                              .includes(q.toLowerCase())
-                          )
-                        : null;
+                    const chainQuery = q.trim().toLowerCase();
+const hasChainLetter = /[a-zα-ω]/i.test(chainQuery);
+
+const matchedChainItem =
+  order.orderItems.length > 0
+    ? order.orderItems.find((item) => {
+        const value = item.storageChainNumber?.toLowerCase() || "";
+
+        return hasChainLetter
+          ? value.startsWith(chainQuery)
+          : value === chainQuery;
+      })
+    : null;
 
                     return (
                       <Link
