@@ -52,6 +52,7 @@ export async function POST(req: Request) {
 
     const customerId = Number(body.customerId);
     const serviceType = String(body.serviceType || "").trim();
+
     const saveMode: "draft" | "final" =
       body.saveMode === "draft" ? "draft" : "final";
 
@@ -147,94 +148,102 @@ export async function POST(req: Request) {
 
     const nextDeliveryStatus: DeliveryStatus = DeliveryStatus.PENDING;
 
-    const order = await prisma.$transaction(async (tx) => {
-      const rowsWithRealSerials: Array<{
-        productId: number;
-        quantity: number;
-        unitPrice: number;
-        lineTotal: number;
-        itemSerialNumber: number | null;
-      }> = [];
+    const order = await prisma.$transaction(
+      async (tx) => {
+        const rowsWithRealSerials: Array<{
+          productId: number;
+          quantity: number;
+          unitPrice: number;
+          lineTotal: number;
+          itemSerialNumber: number | null;
+        }> = [];
 
-      for (const row of validRows) {
-        const quantity = Number(row.quantity);
-        const unitPrice = Number(row.unitPrice);
-        const lineTotal = Number(row.lineTotal);
-        const productId = Number(row.productId);
+        for (const row of validRows) {
+          const quantity = Number(row.quantity);
+          const unitPrice = Number(row.unitPrice);
+          const lineTotal = Number(row.lineTotal);
+          const productId = Number(row.productId);
 
-        if (isDraft) {
-          rowsWithRealSerials.push({
-            productId,
-            quantity,
-            unitPrice,
-            lineTotal,
-            itemSerialNumber: null,
-          });
-          continue;
-        }
+          if (isDraft) {
+            rowsWithRealSerials.push({
+              productId,
+              quantity,
+              unitPrice,
+              lineTotal,
+              itemSerialNumber: null,
+            });
 
-        if (typedServiceType === ServiceType.LINEN) {
-          const realSerial = await getNextSerial(tx, typedServiceType);
+            continue;
+          }
 
-          rowsWithRealSerials.push({
-            productId,
-            quantity,
-            unitPrice,
-            lineTotal,
-            itemSerialNumber: realSerial,
-          });
-        } else {
-          for (let i = 0; i < quantity; i++) {
+          if (typedServiceType === ServiceType.LINEN) {
             const realSerial = await getNextSerial(tx, typedServiceType);
 
             rowsWithRealSerials.push({
               productId,
-              quantity: 1,
+              quantity,
               unitPrice,
-              lineTotal: unitPrice,
+              lineTotal,
               itemSerialNumber: realSerial,
             });
+          } else {
+            for (let i = 0; i < quantity; i++) {
+              const realSerial = await getNextSerial(tx, typedServiceType);
+
+              rowsWithRealSerials.push({
+                productId,
+                quantity: 1,
+                unitPrice,
+                lineTotal: unitPrice,
+                itemSerialNumber: realSerial,
+              });
+            }
           }
         }
-      }
 
-      return tx.order.create({
-        data: {
-          customer: {
-            connect: { id: customerId },
-          },
-          serviceType: typedServiceType,
-          itemsDescription: body.itemsDescription || null,
-          quantity: totalItems > 0 ? totalItems : null,
-          squareMeters:
-            body.squareMeters != null && !Number.isNaN(Number(body.squareMeters))
-              ? Number(body.squareMeters)
-              : null,
-          totalPrice: totalFromRows > 0 ? totalFromRows : null,
-          paidAmount,
-          pickupDate,
-          deliveryDate,
-          notes: body.notes || null,
-          status: nextStatus,
-          deliveryStatus: nextDeliveryStatus,
-          paymentStatus: nextPaymentStatus,
-          orderItems: {
-            create: rowsWithRealSerials,
-          },
-          statusHistory: {
-            create: {
-              status: nextStatus,
-              notes: isDraft
-                ? "Προσωρινή αποθήκευση παραγγελίας."
-                : "Δημιουργία παραγγελίας.",
+        return tx.order.create({
+          data: {
+            customer: {
+              connect: { id: customerId },
+            },
+            serviceType: typedServiceType,
+            itemsDescription: body.itemsDescription || null,
+            quantity: totalItems > 0 ? totalItems : null,
+            squareMeters:
+              body.squareMeters != null &&
+              !Number.isNaN(Number(body.squareMeters))
+                ? Number(body.squareMeters)
+                : null,
+            totalPrice: totalFromRows > 0 ? totalFromRows : null,
+            paidAmount,
+            pickupDate,
+            deliveryDate,
+            notes: body.notes || null,
+            status: nextStatus,
+            deliveryStatus: nextDeliveryStatus,
+            paymentStatus: nextPaymentStatus,
+            orderItems: {
+              create: rowsWithRealSerials,
+            },
+            statusHistory: {
+              create: {
+                status: nextStatus,
+                notes: isDraft
+                  ? "Προσωρινή αποθήκευση παραγγελίας."
+                  : "Δημιουργία παραγγελίας.",
+              },
             },
           },
-        },
-        include: {
-          orderItems: true,
-        },
-      });
-    });
+          include: {
+            orderItems: true,
+          },
+        });
+      },
+      {
+        maxWait: 10000,
+        timeout: 20000,
+      }
+    );
 
     return Response.json(order);
   } catch (error) {
